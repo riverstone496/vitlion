@@ -34,6 +34,7 @@ from timm.utils import ApexScaler, NativeScaler
 
 import webdataset as wds
 import torch.distributed as dist
+import pandas as pd
 
 from data.loader import create_loader, create_transform_webdataset
 from models.factory import create_model, safe_model_name
