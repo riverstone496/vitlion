@@ -764,6 +764,7 @@ def main():
                 param_name_dict = param_name_dict, prev_weight_dict=prev_weight_dict,prev_grad_dict=prev_grad_dict,prev_momentum_dict=prev_momentum_dict)
             
             ## EVAL
+            num_updates = (epoch+1) * len(loader_train)
             eval_metrics = validate(
                 model,
                 loader_eval,
@@ -782,7 +783,8 @@ def main():
             if args.rank == 0:
                 original_update_summary(
                     epoch, train_metrics, eval_metrics,
-                    log_wandb=args.log_wandb and has_wandb)
+                    log_wandb=args.log_wandb and has_wandb,
+                    num_updates=num_updates)
 
             #if saver is not None:
             #    # save proper checkpoint with eval metric
@@ -868,7 +870,7 @@ def train_one_epoch(
 
         state_info = None
         if args.log_optimizer_state and args.rank == 0:
-            if batch_idx % args.log_interval == 0:
+            if num_updates % args.log_interval == 0:
                 state_info = {}
                 for p in optimizer.state.keys():
                     param_name = param_name_dict[p]

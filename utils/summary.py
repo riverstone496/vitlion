@@ -15,8 +15,9 @@ except ImportError:
     pass
 
 
-def original_update_summary(epoch, train_metrics, eval_metrics, log_wandb=False):
+def original_update_summary(epoch, train_metrics, eval_metrics, log_wandb=False, num_updates=None):
     rowd = OrderedDict(epoch=epoch)
+    rowd['iter'] = num_updates
     if train_metrics:
         rowd.update([('train_' + k, v) for k, v in train_metrics.items()])
     if eval_metrics:
