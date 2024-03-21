@@ -48,6 +48,7 @@ from torchvision import transforms
 from optimizers.lion import Lion
 from optimizers.lion_mshift import Lion_mshift
 from optimizers.lion_mvote import Lion_MVote
+from optimizers.sign_mvote import Sign_MVote
 
 def print0(message):
     if dist.is_initialized():
@@ -653,6 +654,8 @@ def main():
     elif args.optimizer_name == 'lion_mshift':
         optimizer = Lion_mshift(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
         model.require_backward_grad_sync = False
+    elif args.optimizer_name == 'sign_mvote':
+        optimizer = Sign_MVote(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
     elif args.optimizer_name == 'adamw':
         optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
 
