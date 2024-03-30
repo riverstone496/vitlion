@@ -49,6 +49,7 @@ from optimizers.lion import Lion
 from optimizers.lion_mshift import Lion_mshift
 from optimizers.lion_mvote import Lion_MVote
 from optimizers.sign_mvote import Sign_MVote
+from optimizers.lionmean import Lion_Mean
 
 def print0(message):
     if dist.is_initialized():
@@ -654,6 +655,9 @@ def main():
     elif args.optimizer_name == 'lion_mshift':
         optimizer = Lion_mshift(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
         model.require_backward_grad_sync = False
+    elif args.optimizer_name == 'lion_mean':
+        optimizer = Lion_Mean(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
+        model.require_backward_grad_sync = False
     elif args.optimizer_name == 'sign_mvote':
         optimizer = Sign_MVote(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
     elif args.optimizer_name == 'adamw':
@@ -900,7 +904,7 @@ def train_one_epoch(
                         state_info['grad_cosine_sim/'+param_name] = cos_func(grad.view(-1), prev_grad.view(-1))
                         state_info['grad_norm_ratio/'+param_name] = state_info['grad_norm/'+param_name] / torch.norm(prev_grad).item()
                         state_info['grad_norm_element_ratio/'+param_name] = state_info['grad_norm_element/'+param_name] / torch.abs(prev_grad).mean(dtype=torch.float32).item()
-                    if param_name in prev_momentum_dict.keys():
+                    if param_name in prev_momentum_dict.keys() and args.momentum != 1:
                         prev_momentum = prev_momentum_dict[param_name]
                         state_info['momentum_relative_error/'+param_name] = torch.norm(momentum - prev_momentum) / state_info['momentum_norm/'+param_name]
                         state_info['momentum_relative_error_element/'+param_name] = torch.abs(momentum - prev_momentum).mean(dtype=torch.float32).item() / state_info['momentum_norm_element/'+param_name]
