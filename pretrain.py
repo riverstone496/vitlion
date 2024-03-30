@@ -911,7 +911,7 @@ def train_one_epoch(
                         state_info['momentum_cosine_sim/'+param_name] = cos_func(momentum.view(-1), prev_momentum.view(-1))
                         state_info['momentum_norm_ratio/'+param_name] = state_info['momentum_norm/'+param_name]/ torch.norm(prev_momentum).item()
                         state_info['momentum_norm_element_ratio/'+param_name] = state_info['momentum_norm_element/'+param_name] / torch.abs(prev_momentum).mean(dtype=torch.float32).item()
-                    if param_name in prev_grad_dict.keys() and param_name in prev_momentum_dict.keys():
+                    if param_name in prev_grad_dict.keys() and param_name in prev_momentum_dict.keys() and args.momentum != 1:
                         update = momentum.clone().mul_(args.momentum).add(grad, alpha=1 - args.momentum).sign_()
                         prev_update = prev_momentum.clone().mul_(args.momentum).add(prev_grad, alpha=1 - args.momentum).sign_()
                         state_info['update_relative_error/'+param_name] = torch.norm(update - prev_update) / torch.norm(update)
@@ -927,7 +927,8 @@ def train_one_epoch(
                         param_name = param_name_dict[p]
                         prev_weight_dict[param_name] = p.data.detach().clone()
                         prev_grad_dict[param_name] = p.grad.detach().clone()
-                        prev_momentum_dict[param_name] = optimizer.state[p]["exp_avg"].detach().clone()
+                        if args.momentum != 0:
+                            prev_momentum_dict[param_name] = optimizer.state[p]["exp_avg"].detach().clone()
 
             if str(num_updates) in args.log_weight_iters:
                 if args.log_wandb:
