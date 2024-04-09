@@ -50,6 +50,7 @@ from optimizers.lion import Lion
 from optimizers.lion_mshift import Lion_mshift
 from optimizers.lion_mvote import Lion_MVote
 from optimizers.sign_mvote import Sign_MVote
+from utils.distributed_sim import average_gradients, apply_lion_preprocessing, sign_gradients, average_momentums
 
 def print0(message):
     if dist.is_initialized():
@@ -387,21 +388,21 @@ def main():
             args.num_classes = 100
         args.input_size = [3, 32, 32]
         if args.model == 'resnet18':
-            model = ResNet18(num_classes=args.num_classes)
+            global_model = ResNet18(num_classes=args.num_classes)
         elif args.model == 'resnet34':
-            model = ResNet34(num_classes=args.num_classes)
+            global_model = ResNet34(num_classes=args.num_classes)
         elif args.model == 'resnet50':
-            model = ResNet50(num_classes=args.num_classes)
+            global_model = ResNet50(num_classes=args.num_classes)
         elif args.model == 'wideresnet16':
-            model = WideResNet(depth=16, num_classes=args.num_classes, widen_factor=8, dropRate=args.drop)
+            global_model = WideResNet(depth=16, num_classes=args.num_classes, widen_factor=8, dropRate=args.drop)
         elif args.model == 'wideresnet28':
-            model = WideResNet(depth=28, num_classes=args.num_classes, widen_factor=10, dropRate=args.drop)
+            global_model = WideResNet(depth=28, num_classes=args.num_classes, widen_factor=10, dropRate=args.drop)
         elif 'VGG' in args.model:
-            model = VGG(vgg_name=args.model, num_classes=args.num_classes)
+            global_model = VGG(vgg_name=args.model, num_classes=args.num_classes)
         else:
             print('No model matched')
     else:
-        model = create_model(
+        global_model = create_model(
         args.model,
         pretrained=args.pretrained,
         num_classes=args.num_classes,
@@ -415,19 +416,19 @@ def main():
 
     models = []
     for i in range(args.num_optimizer):
-        copied_model = copy.deepcopy(model)
+        copied_model = copy.deepcopy(global_model)
         models.append(copied_model)
 
     param_name_dict = {}
     prev_weight_dict = {}
     prev_grad_dict = {}
     prev_momentum_dict = {}
-    for name, param in model.named_parameters():
+    for name, param in global_model.named_parameters():
         param_name_dict[param] = name
 
     if args.rank == 0:
         _logger.info(
-            f'Model {safe_model_name(args.model)} created, param count:{sum([m.numel() for m in model.parameters()])}')
+            f'Model {safe_model_name(args.model)} created, param count:{sum([m.numel() for m in global_model.parameters()])}')
         # # mkdir output dir
         # os.makedirs(args.output, exist_ok=True)
 
@@ -440,7 +441,9 @@ def main():
         num_aug_splits = args.aug_splits
 
     # move model to GPU
-    model.cuda()
+    global_model.cuda()
+    for i in range(args.num_optimizer):
+        models[i].cuda()
 
     # Choose the DataSet Selector
     if args.webdataset:
@@ -647,30 +650,18 @@ def main():
         crop_pct=data_config['crop_pct'],
         pin_memory=args.pin_mem,
         )
-    if args.optimizer_name == 'lion_mshift' and args.momentum_sync_freq ==0:
-        args.optimizer_name = 'lion'
-    if args.optimizer_name == 'lion_mvote' and args.momentum_sync_freq ==0:
-        args.optimizer_name = 'lion'
     
 
-    if args.optimizer_name == 'lion':
-        optimizer = Lion(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
-    elif args.optimizer_name == 'lion_mvote':
-        optimizer = Lion_MVote(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
-        model.require_backward_grad_sync = False
-    elif args.optimizer_name == 'lion_mshift':
-        optimizer = Lion_mshift(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
-        model.require_backward_grad_sync = False
-    elif args.optimizer_name == 'sign_mvote':
-        optimizer = Sign_MVote(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
+    if 'lion' in args.optimizer_name:
+        optimizer = torch.optim.SGD(global_model.parameters(), lr=args.lr, momentum=0, weight_decay=args.weight_decay)
     elif args.optimizer_name == 'adamw':
-        optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
+        optimizer = torch.optim.AdamW(global_model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
 
     # setup automatic mixed-precision (AMP) loss scaling and op casting
     amp_autocast = suppress  # do nothing
     loss_scaler = None
     if use_amp == 'apex':
-        model, optimizer = amp.initialize(model, optimizer, opt_level='O1')
+        global_model, optimizer = amp.initialize(model, optimizer, opt_level='O1')
         loss_scaler = ApexScaler()
         if args.rank == 0:
             _logger.info('Using NVIDIA APEX AMP. Training in mixed precision.')
@@ -687,7 +678,7 @@ def main():
     resume_epoch = None
     if args.resume:
         resume_epoch = resume_checkpoint(
-            model, args.resume,
+            global_model, args.resume,
             optimizer=None if args.no_resume_opt else optimizer,
             loss_scaler=None if args.no_resume_opt else loss_scaler,
             log_info=args.rank == 0)
@@ -700,11 +691,11 @@ def main():
             # Apex DDP preferred unless native amp is activated
             if args.rank == 0:
                 _logger.info("Using NVIDIA APEX DistributedDataParallel.")
-            model = ApexDDP(model, delay_allreduce=True)
+            global_model = ApexDDP(global_model, delay_allreduce=True)
         else:
             if args.rank == 0:
                 _logger.info("Using native Torch DistributedDataParallel.")
-            model = NativeDDP(model, device_ids=[args.local_rank])  # can use device str in Torch >= 1.1
+            global_model = NativeDDP(global_model, device_ids=[args.local_rank])  # can use device str in Torch >= 1.1
 
     # setup learning rate schedule and starting epoch
     iter_per_epoch = len(loader_train)
@@ -768,7 +759,7 @@ def main():
                     loader_train.sampler.set_epoch(epoch)
 
             train_metrics = train_one_epoch(
-                epoch, models, loader_train, optimizer, train_loss_fn, args,
+                epoch, global_model, models, loader_train, optimizer, train_loss_fn, args,
                 lr_scheduler=lr_scheduler, saver=saver, output_dir=output_dir,
                 amp_autocast=amp_autocast, loss_scaler=loss_scaler, mixup_fn=mixup_fn,
                 param_name_dict = param_name_dict, prev_weight_dict=prev_weight_dict,prev_grad_dict=prev_grad_dict,prev_momentum_dict=prev_momentum_dict)
@@ -776,7 +767,7 @@ def main():
             ## EVAL
             num_updates = (epoch+1) * len(loader_train)
             eval_metrics = validate(
-                model,
+                global_model,
                 loader_eval,
                 validate_loss_fn,
                 args,
@@ -819,7 +810,7 @@ def main():
 
 
 def train_one_epoch(
-        epoch, models, loader, optimizer, loss_fn, args,
+        epoch, global_model, models, loader, optimizer, loss_fn, args,
         lr_scheduler=None, saver=None, output_dir=None, amp_autocast=suppress,
         loss_scaler=None, mixup_fn=None,
         param_name_dict = None, prev_weight_dict=None,prev_grad_dict=None,prev_momentum_dict=None):
@@ -836,7 +827,7 @@ def train_one_epoch(
     data_time_m = AverageMeter()
     losses_m = AverageMeter()
 
-    model.train()
+    global_model.train()
 
     end = time.time()
     last_idx = len(loader) - 1
@@ -849,14 +840,13 @@ def train_one_epoch(
             if mixup_fn is not None:
                 input, target = mixup_fn(input, target)
 
+        local_model = models[batch_idx % len(models)]
         with amp_autocast():
-            output = model(input)
+            output = local_model(input)
             loss = loss_fn(output, target)
-
         if not args.distributed:
             losses_m.update(loss.item(), input.size(0))
-
-        model = models[num_updates % len(models)]
+        
         optimizer.zero_grad()
         # if loss_scaler is not None:
         #     loss_scaler(
@@ -866,15 +856,24 @@ def train_one_epoch(
         #         create_graph=second_order)
         if loss_scaler is None:
             loss.backward(create_graph=second_order)
+            if args.optimizer_name == 'lion_mvote':
+                apply_lion_preprocessing(local_model, (args.momentum, args.beta2), sign=True)
+            if args.optimizer_name == 'lion_sync':
+                apply_lion_preprocessing(local_model, (args.momentum, args.beta2), sign=False)
             if args.clip_grad is not None:
                 dispatch_clip_grad(
-                    model_parameters(model, exclude_head='agc' in args.clip_mode),
+                    model_parameters(local_model, exclude_head='agc' in args.clip_mode),
                     value=args.clip_grad, mode=args.clip_mode)
-            if num_updates % len(models) == len(models)-1:
+            if batch_idx % len(models) == len(models)-1 or batch_idx == len(loader)-1:
+                average_gradients(models, global_model)
+                if num_updates % args.momentum_sync_freq == 0:
+                    average_momentums(models)
+                if args.optimizer_name == 'lion_mvote' or args.optimizer_name == 'lion_sync':
+                    sign_gradients(global_model)
                 optimizer.step()
+                num_updates += 1
 
         torch.cuda.synchronize()
-        num_updates += 1
         batch_time_m.update(time.time() - end)
         
         if last_batch or num_updates % args.log_interval == 0:
