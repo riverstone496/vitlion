@@ -1,7 +1,16 @@
-# ExFractalDB and RCDB
+# Lion ViT
+
+ResNet18 on CIFAR10 code used for training.
+For ImageNet, remove -use_cifar.
+```bash $ 
+mpirun -npernode 4 -np 4 python pretrain.py --aa=rand-m9-mstd0.5-inc1 --batch-size=256 --beta2=0.99 --cooldown-epochs=0 --cutmix=1 --dataset=CIFAR10 --drop-path=0.1 --epochs=200 --eval-metric=loss --hflip=0 --interpolation=bicubic --interval_saved_epochs=10 --log-wandb --log_optimizer_state --log_weight_iters=1,3,10,30,100,300,1000,3000,10000,30000,100000,300000,748600 --lr=0.001 --mixup=0.8 --model=resnet18 --momentum=0.9  --no-prefetcher --num-classes=10 --output=./output/pretrain --remode=pixel --repeated-aug --reprob=0.25 --sched=cosine_iter --smoothing=0.1 --state_interval=1 --warmup-epochs=5 --weight-decay=0.1 --workers=16 --optimizer_name=lion_mvote --momentum_sync_freq=100 --use_cifar
+```
+
+# ExFractalDB and RCDB (Original Repo)
 
 ## TOC
-- [ExFractalDB and RCDB](#exfractaldb-and-rcdb)
+- [Lion ViT](#lion-vit)
+- [ExFractalDB and RCDB (Original Repo)](#exfractaldb-and-rcdb-original-repo)
   - [TOC](#toc)
   - [Summary](#summary)
   - [Updates](#updates)
