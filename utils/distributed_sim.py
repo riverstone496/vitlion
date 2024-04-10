@@ -30,6 +30,7 @@ def average_gradients(models, global_model):
     for name, param in global_model.named_parameters():
         if name in avg_grads:
             param.grad = avg_grads[name].clone()
+    return global_model
 
 def average_momentums(models):
     """
@@ -58,6 +59,7 @@ def average_momentums(models):
         for name, param in model.named_parameters():
             if param.exp_avg is not None:
                 param.exp_avg = avg_grads[name]
+    return models
 
 
 def apply_lion_preprocessing(model, betas, sign = True):
@@ -87,6 +89,7 @@ def apply_lion_preprocessing(model, betas, sign = True):
                 else:
                     update = exp_avg.mul(beta1).add(grad, alpha=1 - beta1)
                 param.grad.data = update
+    return model
 
 
 def sign_gradients(model):
@@ -96,3 +99,4 @@ def sign_gradients(model):
             if param.grad is not None:
                 grad = param.grad.data
                 param.grad.data = grad.sign_()
+    return model

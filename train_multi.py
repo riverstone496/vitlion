@@ -415,9 +415,12 @@ def main():
         args.num_classes = model.num_classes  # FIXME handle model default vs config num_classes more elegantly
 
     models = []
+    optimizers= []
     for i in range(args.num_optimizer):
         copied_model = copy.deepcopy(global_model)
+        local_optimizer = torch.optim.SGD(copied_model.parameters(), lr=0)
         models.append(copied_model)
+        optimizers.append(local_optimizer)
 
     param_name_dict = {}
     prev_weight_dict = {}
@@ -759,7 +762,7 @@ def main():
                     loader_train.sampler.set_epoch(epoch)
 
             train_metrics = train_one_epoch(
-                epoch, global_model, models, loader_train, optimizer, train_loss_fn, args,
+                epoch, global_model, models, optimizers, loader_train, optimizer, train_loss_fn, args,
                 lr_scheduler=lr_scheduler, saver=saver, output_dir=output_dir,
                 amp_autocast=amp_autocast, loss_scaler=loss_scaler, mixup_fn=mixup_fn,
                 param_name_dict = param_name_dict, prev_weight_dict=prev_weight_dict,prev_grad_dict=prev_grad_dict,prev_momentum_dict=prev_momentum_dict)
@@ -810,7 +813,7 @@ def main():
 
 
 def train_one_epoch(
-        epoch, global_model, models, loader, optimizer, loss_fn, args,
+        epoch, global_model, models, optimizers, loader, optimizer, loss_fn, args,
         lr_scheduler=None, saver=None, output_dir=None, amp_autocast=suppress,
         loss_scaler=None, mixup_fn=None,
         param_name_dict = None, prev_weight_dict=None,prev_grad_dict=None,prev_momentum_dict=None):
@@ -841,6 +844,7 @@ def train_one_epoch(
                 input, target = mixup_fn(input, target)
 
         local_model = models[batch_idx % len(models)]
+        local_optimizer = optimizers[batch_idx % len(models)]
         with amp_autocast():
             output = local_model(input)
             loss = loss_fn(output, target)
@@ -848,6 +852,7 @@ def train_one_epoch(
             losses_m.update(loss.item(), input.size(0))
         
         optimizer.zero_grad()
+        local_optimizer.zero_grad()
         # if loss_scaler is not None:
         #     loss_scaler(
         #         loss, optimizer,
@@ -857,19 +862,20 @@ def train_one_epoch(
         if loss_scaler is None:
             loss.backward(create_graph=second_order)
             if args.optimizer_name == 'lion_mvote':
-                apply_lion_preprocessing(local_model, (args.momentum, args.beta2), sign=True)
+                local_model = apply_lion_preprocessing(local_model, (args.momentum, args.beta2), sign=True)
             if args.optimizer_name == 'lion_sync':
-                apply_lion_preprocessing(local_model, (args.momentum, args.beta2), sign=False)
+                local_model = apply_lion_preprocessing(local_model, (args.momentum, args.beta2), sign=False)
             if args.clip_grad is not None:
                 dispatch_clip_grad(
                     model_parameters(local_model, exclude_head='agc' in args.clip_mode),
                     value=args.clip_grad, mode=args.clip_mode)
+            models[batch_idx % len(models)] = local_model
             if batch_idx % len(models) == len(models)-1 or batch_idx == len(loader)-1:
-                average_gradients(models, global_model)
+                global_model = average_gradients(models, global_model)
                 if num_updates % args.momentum_sync_freq == 0:
-                    average_momentums(models)
+                    models = average_momentums(models)
                 if args.optimizer_name == 'lion_mvote' or args.optimizer_name == 'lion_sync':
-                    sign_gradients(global_model)
+                    global_model = sign_gradients(global_model)
                 optimizer.step()
                 num_updates += 1
 
