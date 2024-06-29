@@ -312,7 +312,14 @@ parser.add_argument("--momentum_sync_freq", type=int, default=1, help="Frequency
 # CIFAR Dataset
 parser.add_argument('--use_cifar', action='store_true', default=False,
                     help='use cifar dataset')
-
+parser.add_argument('--RandomCrop', action='store_true', default=False,
+                    help='use cifar dataset')
+parser.add_argument('--RandomHorizontalFlip', action='store_true', default=False,
+                    help='use cifar dataset')
+parser.add_argument('--CIFAR10Policy', action='store_true', default=False,
+                    help='use cifar dataset')
+parser.add_argument('--AugmentAll', action='store_true', default=False,
+                    help='use cifar dataset')
 def _parse_args():
     args = parser.parse_args()
 
@@ -520,13 +527,17 @@ def main():
         datasetname = args.dataset.lower()
         normalize = transforms.Normalize(   mean=[x / 255.0 for x in [125.3, 123.0, 113.9]],
                                             std=[x / 255.0 for x in [63.0, 62.1, 66.7]])
-        train_transform = transforms.Compose([
-                transforms.RandomCrop(32, padding=4),
-                transforms.RandomHorizontalFlip(),
-                CIFAR10Policy(),
-                transforms.ToTensor(),
-                normalize
-        ])
+        train_transform = transforms.Compose([])
+        if args.RandomCrop or args.AugmentAll:
+            train_transform.transforms.append(transforms.RandomCrop(32, padding=4))
+        else:
+            train_transform.transforms.append(transforms.Resize((32, 32)))
+        if args.RandomHorizontalFlip or args.AugmentAll:
+            train_transform.transforms.append(transforms.RandomHorizontalFlip())
+        if args.CIFAR10Policy or args.AugmentAll:
+            train_transform.transforms.append(CIFAR10Policy())
+        train_transform.transforms.append(transforms.ToTensor())
+        train_transform.transforms.append(normalize)
         val_transform = transforms.Compose([
                 transforms.Resize((32, 32)),
                 transforms.ToTensor(),
@@ -662,6 +673,8 @@ def main():
         optimizer = Sign_MVote(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
     elif args.optimizer_name == 'adamw':
         optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
+    elif args.optimizer_name == 'sgd':
+        optimizer = torch.optim.SGD(model.parameters(), lr=100*args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
 
     # setup automatic mixed-precision (AMP) loss scaling and op casting
     amp_autocast = suppress  # do nothing
@@ -841,8 +854,8 @@ def train_one_epoch(
     for batch_idx, (input, target) in enumerate(loader):
         last_batch = batch_idx == last_idx
         data_time_m.update(time.time() - end)
+        input, target = input.cuda(), target.cuda()
         if not args.prefetcher:
-            input, target = input.cuda(), target.cuda()
             if mixup_fn is not None:
                 input, target = mixup_fn(input, target)
 
@@ -1012,9 +1025,8 @@ def validate(model, loader, loss_fn, args, amp_autocast=suppress, log_suffix='')
     with torch.no_grad():
         for batch_idx, (input, target) in enumerate(loader):
             last_batch = batch_idx == last_idx
-            if not args.prefetcher:
-                input = input.cuda()
-                target = target.cuda()
+            input = input.cuda()
+            target = target.cuda()
 
             with amp_autocast():
                 output = model(input)
