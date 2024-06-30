@@ -276,7 +276,7 @@ parser.add_argument('--eval-metric', default='top1', type=str, metavar='EVAL_MET
                     help='Best metric (default: "top1"')
 parser.add_argument('--log-wandb', action='store_true', default=False,
                     help='log training and validation metrics to wandb')
-parser.add_argument('--project-name', default='YOUR_WANDB_PPOJECT_NAME', type=str,
+parser.add_argument('--project_name', default=None, type=str,
                     help='set wandb project name')
 parser.add_argument('--group-name', default='YOUR_WANDB_GROUP_NAME', type=str,
                     help='set wandb group name')
@@ -383,7 +383,10 @@ def main():
 
     if args.log_wandb and args.rank == 0:
         if has_wandb:
-            wandb.init(config=args)
+            if args.project_name is None:
+                wandb.init(config=args)
+            else:
+                wandb.init(config=args, project=args.project_name)
         else:
             _logger.warning("You've requested to log metrics to wandb but package not found. "
                             "Metrics not being logged to wandb, try `pip install wandb`")
@@ -654,6 +657,7 @@ def main():
         crop_pct=data_config['crop_pct'],
         pin_memory=args.pin_mem,
         )
+    require_backward_grad_sync = True
     if args.optimizer_name == 'lion_mshift' and args.momentum_sync_freq ==0:
         args.optimizer_name = 'lion'
     if args.optimizer_name == 'lion_mvote' and args.momentum_sync_freq ==0:
@@ -663,12 +667,15 @@ def main():
     elif args.optimizer_name == 'lion_mvote':
         optimizer = Lion_MVote(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
         model.require_backward_grad_sync = False
+        require_backward_grad_sync = False
     elif args.optimizer_name == 'lion_mshift':
         optimizer = Lion_mshift(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
         model.require_backward_grad_sync = False
+        require_backward_grad_sync = False
     elif args.optimizer_name == 'lion_mean':
         optimizer = Lion_Mean(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
         model.require_backward_grad_sync = False
+        require_backward_grad_sync = False
     elif args.optimizer_name == 'sign_mvote':
         optimizer = Sign_MVote(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
     elif args.optimizer_name == 'adamw':
@@ -749,6 +756,8 @@ def main():
     else:
         train_loss_fn = nn.CrossEntropyLoss().cuda()
     validate_loss_fn = nn.CrossEntropyLoss().cuda()
+
+    model.require_backward_grad_sync = require_backward_grad_sync
     
     # setup checkpoint saver and eval metric tracking
     eval_metric = args.eval_metric

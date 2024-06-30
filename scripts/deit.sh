@@ -38,7 +38,7 @@ mpirun -np $NUM_GPUS \
      -x MASTER_PORT=$MASTER_PORT \
      -bind-to none \
      -x PATH \
-     python pretrain.py  --model resnet50  --lr 3e-3 --weight-decay 1 --beta2 0.99 --momentum_sync_freq 1000 \
+     python pretrain.py  --model vit_small_patch16_224  --lr 1e-3 --weight-decay 1 --beta2 0.99 --momentum_sync_freq 1000 \
         --input-size 3 224 224 --project_name lion_imagenet\
         --sched cosine_iter --epochs 90 \
         --batch-size 64 --optimizer_name lion_mvote --num-classes 1000 \
@@ -48,4 +48,5 @@ mpirun -np $NUM_GPUS \
         --remode pixel --interpolation bicubic --hflip 0.0 \
         -j 1 --eval-metric loss --no-prefetcher \
         --output ./output/pretrain \
+        --drop 0.1 --drop_path 0.1\
         --log-wandb --train_data_dir /gs/bs/tga-bayes-crest/ishikawa/dataset/ImageNet2012/train/  --eval_data_dir /gs/bs/tga-bayes-crest/ishikawa/dataset/ImageNet2012/val/
