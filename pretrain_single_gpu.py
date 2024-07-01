@@ -19,7 +19,6 @@ from datetime import datetime
 import shutil
 import math
 import random as rand
-import copy
 
 import torch
 import torch.nn as nn
@@ -50,7 +49,7 @@ from optimizers.lion import Lion
 from optimizers.lion_mshift import Lion_mshift
 from optimizers.lion_mvote import Lion_MVote
 from optimizers.sign_mvote import Sign_MVote
-from utils.distributed_sim import average_gradients, apply_lion_preprocessing, sign_gradients, average_momentums
+from optimizers.lionmean import Lion_Mean
 
 def print0(message):
     if dist.is_initialized():
@@ -269,7 +268,7 @@ parser.add_argument('--pin-mem', action='store_true', default=False,
                     help='Pin CPU memory in DataLoader for more efficient (sometimes) transfer to GPU.')
 parser.add_argument('--no-prefetcher', action='store_true', default=False,
                     help='disable fast prefetcher')
-parser.add_argument('--output', default='', type=str, metavar='PATH',
+parser.add_argument('--output', default='ckpts', type=str, metavar='PATH',
                     help='path to output folder (default: none, current dir)')
 parser.add_argument('--experiment', default=None, type=str, metavar='NAME',
                     help='name of train experiment, name of sub-folder for output')
@@ -277,11 +276,11 @@ parser.add_argument('--eval-metric', default='top1', type=str, metavar='EVAL_MET
                     help='Best metric (default: "top1"')
 parser.add_argument('--log-wandb', action='store_true', default=False,
                     help='log training and validation metrics to wandb')
-parser.add_argument('--project-name', default='YOUR_WANDB_PPOJECT_NAME', type=str,
+parser.add_argument('--project_name', default=None, type=str,
                     help='set wandb project name')
 parser.add_argument('--group-name', default='YOUR_WANDB_GROUP_NAME', type=str,
                     help='set wandb group name')
-parser.add_argument('--interval_saved_epochs', default=10, type=int, metavar='EVAL_METRIC',
+parser.add_argument('--interval_saved_epochs', default=5, type=int, metavar='EVAL_METRIC',
                     help='interval_saved_epochs')
 
 # shampoo
@@ -304,6 +303,8 @@ parser.add_argument('--use_inverse', action='store_true', default=False,
                     help='shampoo_inverse')
 parser.add_argument('--dmp_opt', default='mean', type=str)
 
+parser.add_argument('--log_optimizer_state', action='store_true', default=False)
+parser.add_argument("--state_interval", type=int, default=1, help="Interval to the previous optimizer state")
 parser.add_argument("--log_weight_iters", type=str, default='None', help="Interval to the previous optimizer state")
 parser.add_argument('--ckpo_with_current_time', action='store_true', default=False)
 parser.add_argument("--momentum_sync_freq", type=int, default=1, help="Frequency for sync momentum")
@@ -311,8 +312,14 @@ parser.add_argument("--momentum_sync_freq", type=int, default=1, help="Frequency
 # CIFAR Dataset
 parser.add_argument('--use_cifar', action='store_true', default=False,
                     help='use cifar dataset')
-parser.add_argument('--num_optimizer', default=8, type=int)
-
+parser.add_argument('--RandomCrop', action='store_true', default=False,
+                    help='use cifar dataset')
+parser.add_argument('--RandomHorizontalFlip', action='store_true', default=False,
+                    help='use cifar dataset')
+parser.add_argument('--CIFAR10Policy', action='store_true', default=False,
+                    help='use cifar dataset')
+parser.add_argument('--AugmentAll', action='store_true', default=False,
+                    help='use cifar dataset')
 def _parse_args():
     args = parser.parse_args()
 
@@ -376,7 +383,11 @@ def main():
 
     if args.log_wandb and args.rank == 0:
         if has_wandb:
-            wandb.init(config=args)
+            if args.project_name is None:
+                wandb.init(config=args)
+            else:
+                wandb.init(config=args, project=args.project_name)
+            args.experiment = str(wandb.run.name)
         else:
             _logger.warning("You've requested to log metrics to wandb but package not found. "
                             "Metrics not being logged to wandb, try `pip install wandb`")
@@ -388,21 +399,21 @@ def main():
             args.num_classes = 100
         args.input_size = [3, 32, 32]
         if args.model == 'resnet18':
-            global_model = ResNet18(num_classes=args.num_classes)
+            model = ResNet18(num_classes=args.num_classes)
         elif args.model == 'resnet34':
-            global_model = ResNet34(num_classes=args.num_classes)
+            model = ResNet34(num_classes=args.num_classes)
         elif args.model == 'resnet50':
-            global_model = ResNet50(num_classes=args.num_classes)
+            model = ResNet50(num_classes=args.num_classes)
         elif args.model == 'wideresnet16':
-            global_model = WideResNet(depth=16, num_classes=args.num_classes, widen_factor=8, dropRate=args.drop)
+            model = WideResNet(depth=16, num_classes=args.num_classes, widen_factor=8, dropRate=args.drop)
         elif args.model == 'wideresnet28':
-            global_model = WideResNet(depth=28, num_classes=args.num_classes, widen_factor=10, dropRate=args.drop)
+            model = WideResNet(depth=28, num_classes=args.num_classes, widen_factor=10, dropRate=args.drop)
         elif 'VGG' in args.model:
-            global_model = VGG(vgg_name=args.model, num_classes=args.num_classes)
+            model = VGG(vgg_name=args.model, num_classes=args.num_classes)
         else:
             print('No model matched')
     else:
-        global_model = create_model(
+        model = create_model(
         args.model,
         pretrained=args.pretrained,
         num_classes=args.num_classes,
@@ -414,24 +425,16 @@ def main():
         assert hasattr(model, 'num_classes'), 'Model must have `num_classes` attr if not set on cmd line/config.'
         args.num_classes = model.num_classes  # FIXME handle model default vs config num_classes more elegantly
 
-    models = []
-    optimizers= []
-    for i in range(args.num_optimizer):
-        copied_model = copy.deepcopy(global_model)
-        local_optimizer = torch.optim.SGD(copied_model.parameters(), lr=0)
-        models.append(copied_model)
-        optimizers.append(local_optimizer)
-
     param_name_dict = {}
     prev_weight_dict = {}
     prev_grad_dict = {}
     prev_momentum_dict = {}
-    for name, param in global_model.named_parameters():
+    for name, param in model.named_parameters():
         param_name_dict[param] = name
 
     if args.rank == 0:
         _logger.info(
-            f'Model {safe_model_name(args.model)} created, param count:{sum([m.numel() for m in global_model.parameters()])}')
+            f'Model {safe_model_name(args.model)} created, param count:{sum([m.numel() for m in model.parameters()])}')
         # # mkdir output dir
         # os.makedirs(args.output, exist_ok=True)
 
@@ -444,9 +447,7 @@ def main():
         num_aug_splits = args.aug_splits
 
     # move model to GPU
-    global_model.cuda()
-    for i in range(args.num_optimizer):
-        models[i].cuda()
+    model.cuda()
 
     # Choose the DataSet Selector
     if args.webdataset:
@@ -530,13 +531,17 @@ def main():
         datasetname = args.dataset.lower()
         normalize = transforms.Normalize(   mean=[x / 255.0 for x in [125.3, 123.0, 113.9]],
                                             std=[x / 255.0 for x in [63.0, 62.1, 66.7]])
-        train_transform = transforms.Compose([
-                transforms.RandomCrop(32, padding=4),
-                transforms.RandomHorizontalFlip(),
-                CIFAR10Policy(),
-                transforms.ToTensor(),
-                normalize
-        ])
+        train_transform = transforms.Compose([])
+        if args.RandomCrop or args.AugmentAll:
+            train_transform.transforms.append(transforms.RandomCrop(32, padding=4))
+        else:
+            train_transform.transforms.append(transforms.Resize((32, 32)))
+        if args.RandomHorizontalFlip or args.AugmentAll:
+            train_transform.transforms.append(transforms.RandomHorizontalFlip())
+        if args.CIFAR10Policy or args.AugmentAll:
+            train_transform.transforms.append(CIFAR10Policy())
+        train_transform.transforms.append(transforms.ToTensor())
+        train_transform.transforms.append(normalize)
         val_transform = transforms.Compose([
                 transforms.Resize((32, 32)),
                 transforms.ToTensor(),
@@ -653,18 +658,37 @@ def main():
         crop_pct=data_config['crop_pct'],
         pin_memory=args.pin_mem,
         )
-    
-
-    if 'lion' in args.optimizer_name:
-        optimizer = torch.optim.SGD(global_model.parameters(), lr=args.lr, momentum=0, weight_decay=args.weight_decay)
+    require_backward_grad_sync = True
+    if args.optimizer_name == 'lion_mshift' and args.momentum_sync_freq ==0:
+        args.optimizer_name = 'lion'
+    if args.optimizer_name == 'lion_mvote' and args.momentum_sync_freq ==0:
+        args.optimizer_name = 'lion'
+    if args.optimizer_name == 'lion':
+        optimizer = Lion(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
+    elif args.optimizer_name == 'lion_mvote':
+        optimizer = Lion_MVote(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
+        model.require_backward_grad_sync = False
+        require_backward_grad_sync = False
+    elif args.optimizer_name == 'lion_mshift':
+        optimizer = Lion_mshift(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
+        model.require_backward_grad_sync = False
+        require_backward_grad_sync = False
+    elif args.optimizer_name == 'lion_mean':
+        optimizer = Lion_Mean(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
+        model.require_backward_grad_sync = False
+        require_backward_grad_sync = False
+    elif args.optimizer_name == 'sign_mvote':
+        optimizer = Sign_MVote(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
     elif args.optimizer_name == 'adamw':
-        optimizer = torch.optim.AdamW(global_model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
+        optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
+    elif args.optimizer_name == 'sgd':
+        optimizer = torch.optim.SGD(model.parameters(), lr=100*args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
 
     # setup automatic mixed-precision (AMP) loss scaling and op casting
     amp_autocast = suppress  # do nothing
     loss_scaler = None
     if use_amp == 'apex':
-        global_model, optimizer = amp.initialize(model, optimizer, opt_level='O1')
+        model, optimizer = amp.initialize(model, optimizer, opt_level='O1')
         loss_scaler = ApexScaler()
         if args.rank == 0:
             _logger.info('Using NVIDIA APEX AMP. Training in mixed precision.')
@@ -681,7 +705,7 @@ def main():
     resume_epoch = None
     if args.resume:
         resume_epoch = resume_checkpoint(
-            global_model, args.resume,
+            model, args.resume,
             optimizer=None if args.no_resume_opt else optimizer,
             loss_scaler=None if args.no_resume_opt else loss_scaler,
             log_info=args.rank == 0)
@@ -694,11 +718,11 @@ def main():
             # Apex DDP preferred unless native amp is activated
             if args.rank == 0:
                 _logger.info("Using NVIDIA APEX DistributedDataParallel.")
-            global_model = ApexDDP(global_model, delay_allreduce=True)
+            model = ApexDDP(model, delay_allreduce=True)
         else:
             if args.rank == 0:
                 _logger.info("Using native Torch DistributedDataParallel.")
-            global_model = NativeDDP(global_model, device_ids=[args.local_rank])  # can use device str in Torch >= 1.1
+            model = NativeDDP(model, device_ids=[args.local_rank])  # can use device str in Torch >= 1.1
 
     # setup learning rate schedule and starting epoch
     iter_per_epoch = len(loader_train)
@@ -733,6 +757,8 @@ def main():
     else:
         train_loss_fn = nn.CrossEntropyLoss().cuda()
     validate_loss_fn = nn.CrossEntropyLoss().cuda()
+
+    model.require_backward_grad_sync = require_backward_grad_sync
     
     # setup checkpoint saver and eval metric tracking
     eval_metric = args.eval_metric
@@ -740,19 +766,21 @@ def main():
     best_epoch = None
     saver = None
     output_dir = None
-    # if args.rank == 0:
-    #     exp_name = '-'.join([
-    #         datetime.now().strftime("%Y%m%d-%H%M%S.%f"),
-    #         safe_model_name(args.model),
-    #         str(data_config['input_size'][-1])
-    #     ])
-    #     output_dir = get_outdir(args.output if args.output else './output/train', exp_name)
-    #     decreasing = True if eval_metric == 'loss' else False
-    #     saver = CheckpointSaver(
-    #         model=model, optimizer=optimizer, args=args, amp_scaler=loss_scaler,
-    #         checkpoint_dir=output_dir, recovery_dir=output_dir, decreasing=decreasing, max_history=args.checkpoint_hist)
-    #     with open(os.path.join(output_dir, 'args.yaml'), 'w') as f:
-    #         f.write(args_text)
+    if args.rank == 0:
+        exp_name = '-'.join([
+            datetime.now().strftime("%Y%m%d-%H%M%S.%f"),
+            safe_model_name(args.model),
+            safe_model_name(args.optimizer_name),
+            safe_model_name(args.lr),
+            str(data_config['input_size'][-1])
+        ])
+        output_dir = get_outdir(args.output if args.output else './output/train', exp_name)
+        decreasing = True if eval_metric == 'loss' else False
+        # saver = CheckpointSaver(
+        #     model=model, optimizer=optimizer, args=args, amp_scaler=loss_scaler,
+        #     checkpoint_dir=output_dir, recovery_dir=output_dir, decreasing=decreasing, max_history=args.checkpoint_hist)
+        # with open(os.path.join(output_dir, 'args.yaml'), 'w') as f:
+        #     f.write(args_text)
 
     try:
         for epoch in range(start_epoch, num_epochs):
@@ -762,15 +790,14 @@ def main():
                     loader_train.sampler.set_epoch(epoch)
 
             train_metrics = train_one_epoch(
-                epoch, global_model, models, optimizers, loader_train, optimizer, train_loss_fn, args,
+                epoch, model, loader_train, optimizer, train_loss_fn, args,
                 lr_scheduler=lr_scheduler, saver=saver, output_dir=output_dir,
-                amp_autocast=amp_autocast, loss_scaler=loss_scaler, mixup_fn=mixup_fn,
-                param_name_dict = param_name_dict, prev_weight_dict=prev_weight_dict,prev_grad_dict=prev_grad_dict,prev_momentum_dict=prev_momentum_dict)
+                amp_autocast=amp_autocast, loss_scaler=loss_scaler, mixup_fn=mixup_fn)
             
             ## EVAL
             num_updates = (epoch+1) * len(loader_train)
             eval_metrics = validate(
-                global_model,
+                model,
                 loader_eval,
                 validate_loss_fn,
                 args,
@@ -790,21 +817,22 @@ def main():
                     log_wandb=args.log_wandb and has_wandb,
                     num_updates=num_updates)
 
-            #if saver is not None:
-            #    # save proper checkpoint with eval metric
-            #    save_metric = train_metrics[eval_metric]
-            #    best_metric, best_epoch = saver.save_checkpoint(epoch, metric=save_metric)
-            #    if args.interval_saved_epochs is not None and epoch % args.interval_saved_epochs == 0:
-            #        # only the last {args.checkpoint_hist} checkpoints will be kept
-            #        # this makes checkpoint every args.interval_saved_epochs to be saved
-            #        if args.output:
-            #            checkpoint_file = f'{args.output}/{args.experiment}/checkpoint-{epoch}.pth.tar'
-            #            target_file = f'{args.output}/{args.experiment}/held-checkpoint-{epoch}.pth.tar'
-            #        else:
-            #            checkpoint_file = f'output/train/{args.experiment}/checkpoint-{epoch}.pth.tar'
-            #            target_file = f'output/train/{args.experiment}/held-checkpoint-{epoch}.pth.tar'
-            #        if os.path.exists(checkpoint_file):
-            #            shutil.copyfile(checkpoint_file, target_file)
+            # # Save checkpoint
+            # if saver is not None:
+            #     # save proper checkpoint with eval metric
+            #     save_metric = train_metrics[eval_metric]
+            #     best_metric, best_epoch = saver.save_checkpoint(epoch, metric=save_metric)
+            #     if args.interval_saved_epochs is not None and epoch % args.interval_saved_epochs == 0:
+            #         # only the last {args.checkpoint_hist} checkpoints will be kept
+            #         # this makes checkpoint every args.interval_saved_epochs to be saved
+            #         if args.output:
+            #             checkpoint_file = f'{args.output}/{args.experiment}/checkpoint-{epoch}.pth.tar'
+            #             target_file = f'{args.output}/{args.experiment}/held-checkpoint-{epoch}.pth.tar'
+            #         else:
+            #             checkpoint_file = f'output/train/{args.experiment}/checkpoint-{epoch}.pth.tar'
+            #             target_file = f'output/train/{args.experiment}/held-checkpoint-{epoch}.pth.tar'
+            #         if os.path.exists(checkpoint_file):
+            #             shutil.copyfile(checkpoint_file, target_file)
 
     except KeyboardInterrupt:
         pass
@@ -813,10 +841,9 @@ def main():
 
 
 def train_one_epoch(
-        epoch, global_model, models, optimizers, loader, optimizer, loss_fn, args,
+        epoch, model, loader, optimizer, loss_fn, args,
         lr_scheduler=None, saver=None, output_dir=None, amp_autocast=suppress,
-        loss_scaler=None, mixup_fn=None,
-        param_name_dict = None, prev_weight_dict=None,prev_grad_dict=None,prev_momentum_dict=None):
+        loss_scaler=None, mixup_fn=None):
 
     if args.mixup_off_epoch and epoch >= args.mixup_off_epoch:
         if args.prefetcher and loader.mixup_enabled:
@@ -830,7 +857,7 @@ def train_one_epoch(
     data_time_m = AverageMeter()
     losses_m = AverageMeter()
 
-    global_model.train()
+    model.train()
 
     end = time.time()
     last_idx = len(loader) - 1
@@ -838,21 +865,19 @@ def train_one_epoch(
     for batch_idx, (input, target) in enumerate(loader):
         last_batch = batch_idx == last_idx
         data_time_m.update(time.time() - end)
+        input, target = input.cuda(), target.cuda()
         if not args.prefetcher:
-            input, target = input.cuda(), target.cuda()
             if mixup_fn is not None:
                 input, target = mixup_fn(input, target)
 
-        local_model = models[batch_idx % len(models)]
-        local_optimizer = optimizers[batch_idx % len(models)]
         with amp_autocast():
-            output = local_model(input)
+            output = model(input)
             loss = loss_fn(output, target)
+
         if not args.distributed:
             losses_m.update(loss.item(), input.size(0))
-        
+
         optimizer.zero_grad()
-        local_optimizer.zero_grad()
         # if loss_scaler is not None:
         #     loss_scaler(
         #         loss, optimizer,
@@ -861,27 +886,19 @@ def train_one_epoch(
         #         create_graph=second_order)
         if loss_scaler is None:
             loss.backward(create_graph=second_order)
-            if args.optimizer_name == 'lion_mvote':
-                local_model = apply_lion_preprocessing(local_model, (args.momentum, args.beta2), sign=True)
-            if args.optimizer_name == 'lion_sync':
-                local_model = apply_lion_preprocessing(local_model, (args.momentum, args.beta2), sign=False)
             if args.clip_grad is not None:
                 dispatch_clip_grad(
-                    model_parameters(local_model, exclude_head='agc' in args.clip_mode),
+                    model_parameters(model, exclude_head='agc' in args.clip_mode),
                     value=args.clip_grad, mode=args.clip_mode)
-            models[batch_idx % len(models)] = local_model
-            if batch_idx % len(models) == len(models)-1 or batch_idx == len(loader)-1:
-                global_model = average_gradients(models, global_model)
-                if num_updates % args.momentum_sync_freq == 0:
-                    models = average_momentums(models)
-                if args.optimizer_name == 'lion_mvote' or args.optimizer_name == 'lion_sync':
-                    global_model = sign_gradients(global_model)
+            if args.optimizer_name == 'lion_mshift' or args.optimizer_name == 'lion_mvote':
+                optimizer.step(sync_momentum = (num_updates % args.momentum_sync_freq==0))
+            else:
                 optimizer.step()
-                num_updates += 1
 
         torch.cuda.synchronize()
+        num_updates += 1
         batch_time_m.update(time.time() - end)
-        
+
         if last_batch or num_updates % args.log_interval == 0:
             lrl = [param_group['lr'] for param_group in optimizer.param_groups]
             lr = sum(lrl) / len(lrl)
@@ -907,10 +924,6 @@ def train_one_epoch(
                         rate_avg=input.size(0) * args.world_size / batch_time_m.avg,
                         lr=lr,
                         data_time=data_time_m))
-
-                if args.log_wandb:
-                    log_dict = {'epoch' : epoch, 'iter': num_updates, 'lr': lr, 'loss':losses_m.val}
-                    wandb.log(log_dict)
                 if math.isnan(losses_m.val):
                     break
 
@@ -949,9 +962,8 @@ def validate(model, loader, loss_fn, args, amp_autocast=suppress, log_suffix='')
     with torch.no_grad():
         for batch_idx, (input, target) in enumerate(loader):
             last_batch = batch_idx == last_idx
-            if not args.prefetcher:
-                input = input.cuda()
-                target = target.cuda()
+            input = input.cuda()
+            target = target.cuda()
 
             with amp_autocast():
                 output = model(input)
