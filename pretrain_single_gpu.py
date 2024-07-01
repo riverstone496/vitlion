@@ -45,11 +45,9 @@ from models.resnet import ResNet18, ResNet34, ResNet50
 from models.vgg import VGG
 from models.wideresnet import WideResNet
 from torchvision import transforms
-from optimizers.lion import Lion
-from optimizers.lion_mshift import Lion_mshift
-from optimizers.lion_mvote import Lion_MVote
-from optimizers.sign_mvote import Sign_MVote
-from optimizers.lionmean import Lion_Mean
+from optimizers.lion_mvote_signle import Lion_mvote
+from optimizers.lion_mshift_single import Lion_mshift
+from optimizers.lion_single import Lion
 
 def print0(message):
     if dist.is_initialized():
@@ -283,7 +281,7 @@ parser.add_argument('--group-name', default='YOUR_WANDB_GROUP_NAME', type=str,
 parser.add_argument('--interval_saved_epochs', default=5, type=int, metavar='EVAL_METRIC',
                     help='interval_saved_epochs')
 
-parser.add_argument('--clients', default=5, type=int, metavar='EVAL_METRIC',
+parser.add_argument('--num_clients', default=5, type=int, metavar='EVAL_METRIC',
                     help='interval_saved_epochs')
 
 # shampoo
@@ -637,34 +635,16 @@ def main():
         pin_memory=args.pin_mem,
         )
     require_backward_grad_sync = True
-    if args.optimizer_name == 'lion_mshift' and args.momentum_sync_freq ==0:
-        args.optimizer_name = 'lion'
-    if args.optimizer_name == 'lion_mvote' and args.momentum_sync_freq ==0:
-        args.optimizer_name = 'lion'
     if args.optimizer_name == 'lion':
-        optimizer = Lion(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
+        optimizer = Lion(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay, num_clients = args.num_clients)
     elif args.optimizer_name == 'lion_mvote':
-        optimizer = Lion_MVote(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
-        model.require_backward_grad_sync = False
-        require_backward_grad_sync = False
+        optimizer = Lion_mvote(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay, num_clients = args.num_clients)
     elif args.optimizer_name == 'lion_mshift':
-        optimizer = Lion_mshift(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
-        model.require_backward_grad_sync = False
-        require_backward_grad_sync = False
-    elif args.optimizer_name == 'lion_mean':
-        optimizer = Lion_Mean(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
-        model.require_backward_grad_sync = False
-        require_backward_grad_sync = False
-    elif args.optimizer_name == 'sign_mvote':
-        optimizer = Sign_MVote(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
+        optimizer = Lion_mshift(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay, num_clients = args.num_clients)
     elif args.optimizer_name == 'adamw':
         optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
     elif args.optimizer_name == 'sgd':
         optimizer = torch.optim.SGD(model.parameters(), lr=100*args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
-
-    optimizer_list = []
-    for client in range(args.clients):
-        optimizer_list.append(copy.deepcopy(optimizer))
 
     # setup automatic mixed-precision (AMP) loss scaling and op casting
     amp_autocast = suppress  # do nothing
@@ -827,6 +807,7 @@ def train_one_epoch(
     end = time.time()
     last_idx = len(loader) - 1
     num_updates = epoch * len(loader)
+    optimizer.zero_grad()
     for batch_idx, (input, target) in enumerate(loader):
         last_batch = batch_idx == last_idx
         data_time_m.update(time.time() - end)
@@ -841,27 +822,22 @@ def train_one_epoch(
 
         if not args.distributed:
             losses_m.update(loss.item(), input.size(0))
-
-        optimizer.zero_grad()
-        # if loss_scaler is not None:
-        #     loss_scaler(
-        #         loss, optimizer,
-        #         clip_grad=args.clip_grad, clip_mode=args.clip_mode,
-        #         parameters=model_parameters(model, exclude_head='agc' in args.clip_mode),
-        #         create_graph=second_order)
-        if loss_scaler is None:
-            loss.backward(create_graph=second_order)
-            if args.clip_grad is not None:
-                dispatch_clip_grad(
-                    model_parameters(model, exclude_head='agc' in args.clip_mode),
-                    value=args.clip_grad, mode=args.clip_mode)
-            if args.optimizer_name == 'lion_mshift' or args.optimizer_name == 'lion_mvote':
-                optimizer.step(sync_momentum = (num_updates % args.momentum_sync_freq==0))
-            else:
-                optimizer.step()
+        loss.backward(create_graph=second_order)
+        if args.clip_grad is not None:
+            dispatch_clip_grad(
+                model_parameters(model, exclude_head='agc' in args.clip_mode),
+                value=args.clip_grad, mode=args.clip_mode)
+        if args.optimizer_name == 'lion_mvote':
+            optimizer.make_update_vec(client_num = batch_idx % args.num_clients)
+        if batch_idx % args.num_clients == args.num_clients-1:
+            optimizer.step()
+            optimizer.zero_grad(set_to_none=True)
+            num_updates += 1
+        if num_updates % args.momentum_sync_freq == args.momentum_sync_freq -1:
+            optimizer.sync_update()
 
         torch.cuda.synchronize()
-        num_updates += 1
+        
         batch_time_m.update(time.time() - end)
 
         if last_batch or num_updates % args.log_interval == 0:
