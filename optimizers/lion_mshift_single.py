@@ -18,7 +18,7 @@ def update_fn(p, update, lr):
     # decay the momentum running average coefficient
     update.mul_(0)
 
-class Lion_shift(Optimizer):
+class Lion_mshift(Optimizer):
     def __init__(
         self, params, lr: float = 1e-4, betas: Tuple[float, float] = (0.9, 0.99), weight_decay: float = 0.0, num_clients: int = 1, use_triton: bool = False
     ):

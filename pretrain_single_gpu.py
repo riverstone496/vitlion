@@ -90,13 +90,13 @@ parser.add_argument('--train_data_dir', default='/mnt/nfs/datasets/ILSVRC2012/tr
                     help='path to dataset, do not used when using WebDataSet')
 parser.add_argument('--eval_data_dir', default='/mnt/nfs/datasets/ILSVRC2012/val/',
                     help='path to dataset, do not used when using WebDataSet')
-parser.add_argument('--dataset', '-d', metavar='NAME', default='',
+parser.add_argument('--dataset', '-d', metavar='NAME', default='cifar10',
                     help='dataset type (default: ImageFolder/ImageTar if empty)')
 parser.add_argument('--train-split', metavar='NAME', default='train',
                     help='dataset train split (default: train)')
 parser.add_argument('--val-split', metavar='NAME', default='validation',
                     help='dataset validation split (default: validation)')
-parser.add_argument('--model', default='deit_tiny_patch16_224', type=str, metavar='MODEL',
+parser.add_argument('--model', default='resnet18', type=str, metavar='MODEL',
                     help='Name of model to train (default: deit_tiny_patch16_224)')
 parser.add_argument('--pretrained', action='store_true', default=False,
                     help='Start with pretrained version of specified network (if avail)')
@@ -130,7 +130,7 @@ parser.add_argument('--dataset_size', default=None, type=int,
                     help='Number of Images in the dataset, set to num_classes * 1000 if None')
 
 # Optimizer parameters
-parser.add_argument('--optimizer_name', default='adamw', type=str, metavar='OPTIMIZER',
+parser.add_argument('--optimizer_name', default='lion', type=str, metavar='OPTIMIZER',
                     help='Optimizer (default: "sgd"')
 parser.add_argument('--opt-eps', default=None, type=float, metavar='EPSILON',
                     help='Optimizer Epsilon (default: None, use opt default)')
@@ -281,7 +281,7 @@ parser.add_argument('--group-name', default='YOUR_WANDB_GROUP_NAME', type=str,
 parser.add_argument('--interval_saved_epochs', default=5, type=int, metavar='EVAL_METRIC',
                     help='interval_saved_epochs')
 
-parser.add_argument('--num_clients', default=5, type=int, metavar='EVAL_METRIC',
+parser.add_argument('--num_clients', default=16, type=int, metavar='EVAL_METRIC',
                     help='interval_saved_epochs')
 
 # shampoo
@@ -721,7 +721,7 @@ def main():
             datetime.now().strftime("%Y%m%d-%H%M%S.%f"),
             safe_model_name(args.model),
             safe_model_name(args.optimizer_name),
-            safe_model_name(args.lr),
+            str(args.lr),
             str(data_config['input_size'][-1])
         ])
         output_dir = get_outdir(args.output if args.output else './output/train', exp_name)
@@ -827,8 +827,7 @@ def train_one_epoch(
             dispatch_clip_grad(
                 model_parameters(model, exclude_head='agc' in args.clip_mode),
                 value=args.clip_grad, mode=args.clip_mode)
-        if args.optimizer_name == 'lion_mvote':
-            optimizer.make_update_vec(client_num = batch_idx % args.num_clients)
+        optimizer.make_update_vec(client_num = batch_idx % args.num_clients)
         if batch_idx % args.num_clients == args.num_clients-1:
             optimizer.step()
             optimizer.zero_grad(set_to_none=True)
@@ -846,12 +845,14 @@ def train_one_epoch(
 
             if args.rank == 0:
                 _logger.info(
+                    'Client: {}  '
                     'Train: {} [{:>4d}/{} ({:>3.0f}%)]  '
                     'Loss: {loss.val:>9.6f} ({loss.avg:>6.4f})  '
                     'Time: {batch_time.val:.3f}s, {rate:>7.2f}/s  '
                     '({batch_time.avg:.3f}s, {rate_avg:>7.2f}/s)  '
                     'LR: {lr:.3e}  '
                     'Data: {data_time.val:.3f} ({data_time.avg:.3f})'.format(
+                        batch_idx % args.num_clients,
                         epoch,
                         batch_idx, len(loader),
                         100. * batch_idx / last_idx,
@@ -932,6 +933,7 @@ def validate(model, loader, loss_fn, args, amp_autocast=suppress, log_suffix='')
                         loss=losses_m, top1=top1_m, top5=top5_m))
 
     metrics = OrderedDict([('loss', losses_m.avg), ('top1', top1_m.avg), ('top5', top5_m.avg)])
+    print0(f"Test: Top1: {top1_m.avg} Top5 {top5_m.avg}  Loss: {losses_m.avg} ")
 
     return metrics
 
