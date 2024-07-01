@@ -770,8 +770,8 @@ def main():
         exp_name = '-'.join([
             datetime.now().strftime("%Y%m%d-%H%M%S.%f"),
             safe_model_name(args.model),
-            safe_model_name(args.optimizer_name),
-            safe_model_name(args.lr),
+            str(args.optimizer_name),
+            str(args.lr),
             str(data_config['input_size'][-1])
         ])
         output_dir = get_outdir(args.output if args.output else './output/train', exp_name)

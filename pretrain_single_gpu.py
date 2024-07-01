@@ -16,7 +16,7 @@ import logging
 from collections import OrderedDict
 from contextlib import suppress
 from datetime import datetime
-import shutil
+import copy
 import math
 import random as rand
 
@@ -283,6 +283,9 @@ parser.add_argument('--group-name', default='YOUR_WANDB_GROUP_NAME', type=str,
 parser.add_argument('--interval_saved_epochs', default=5, type=int, metavar='EVAL_METRIC',
                     help='interval_saved_epochs')
 
+parser.add_argument('--clients', default=5, type=int, metavar='EVAL_METRIC',
+                    help='interval_saved_epochs')
+
 # shampoo
 parser.add_argument('--beta2', default=0.85, type=float)
 parser.add_argument('--matrix_eps', default=1.0e-6, type=float)
@@ -342,25 +345,7 @@ def main():
     args.local_rank = 0
     args.world_size = 1
     args.rank = 0  # global rank
-    if args.distributed:
-        # initialize torch.distributed using MPI
-        master_addr = os.getenv("MASTER_ADDR", default="localhost")
-        master_port = os.getenv('MASTER_PORT', default='8888')
-        method = "tcp://{}:{}".format(master_addr, master_port)
-        rank = int(os.getenv('OMPI_COMM_WORLD_RANK', '0'))  # global rank
-        world_size = int(os.getenv('OMPI_COMM_WORLD_SIZE', '1'))
-
-        ngpus_per_node = torch.cuda.device_count()
-        node = rank // ngpus_per_node
-        args.local_rank = rank % ngpus_per_node
-        torch.cuda.set_device(args.local_rank)
-        torch.distributed.init_process_group(backend=args.dist_backend, init_method=method, world_size=world_size, rank=rank)
-        args.rank = rank
-        args.world_size = world_size
-        _logger.info('Training in distributed mode with multiple processes, 1 GPU per process. Process %d:%d, total %d.'
-                     % (args.local_rank, node, args.world_size))
-    else:
-        _logger.info('Training with a single process on 1 GPUs.')
+    _logger.info('Training with a single process on 1 GPUs.')
     assert args.rank >= 0
 
     # resolve AMP arguments based on PyTorch / Apex availability
@@ -424,13 +409,6 @@ def main():
     if args.num_classes is None:
         assert hasattr(model, 'num_classes'), 'Model must have `num_classes` attr if not set on cmd line/config.'
         args.num_classes = model.num_classes  # FIXME handle model default vs config num_classes more elegantly
-
-    param_name_dict = {}
-    prev_weight_dict = {}
-    prev_grad_dict = {}
-    prev_momentum_dict = {}
-    for name, param in model.named_parameters():
-        param_name_dict[param] = name
 
     if args.rank == 0:
         _logger.info(
@@ -684,6 +662,10 @@ def main():
     elif args.optimizer_name == 'sgd':
         optimizer = torch.optim.SGD(model.parameters(), lr=100*args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
 
+    optimizer_list = []
+    for client in range(args.clients):
+        optimizer_list.append(copy.deepcopy(optimizer))
+
     # setup automatic mixed-precision (AMP) loss scaling and op casting
     amp_autocast = suppress  # do nothing
     loss_scaler = None
@@ -711,18 +693,6 @@ def main():
             log_info=args.rank == 0)
         if args.rank == 0:
             _logger.info('resume epoch: {}'.format(resume_epoch))
-
-    # setup distributed training
-    if args.distributed:
-        if has_apex and use_amp != 'native':
-            # Apex DDP preferred unless native amp is activated
-            if args.rank == 0:
-                _logger.info("Using NVIDIA APEX DistributedDataParallel.")
-            model = ApexDDP(model, delay_allreduce=True)
-        else:
-            if args.rank == 0:
-                _logger.info("Using native Torch DistributedDataParallel.")
-            model = NativeDDP(model, device_ids=[args.local_rank])  # can use device str in Torch >= 1.1
 
     # setup learning rate schedule and starting epoch
     iter_per_epoch = len(loader_train)
@@ -784,11 +754,6 @@ def main():
 
     try:
         for epoch in range(start_epoch, num_epochs):
-
-            if args.webdataset is not True:
-                if args.distributed and hasattr(loader_train.sampler, 'set_epoch'):
-                    loader_train.sampler.set_epoch(epoch)
-
             train_metrics = train_one_epoch(
                 epoch, model, loader_train, optimizer, train_loss_fn, args,
                 lr_scheduler=lr_scheduler, saver=saver, output_dir=output_dir,
@@ -903,10 +868,6 @@ def train_one_epoch(
             lrl = [param_group['lr'] for param_group in optimizer.param_groups]
             lr = sum(lrl) / len(lrl)
 
-            if args.distributed:
-                reduced_loss = reduce_tensor(loss.data, args.world_size)
-                losses_m.update(reduced_loss.item(), input.size(0))
-
             if args.rank == 0:
                 _logger.info(
                     'Train: {} [{:>4d}/{} ({:>3.0f}%)]  '
@@ -973,12 +934,7 @@ def validate(model, loader, loss_fn, args, amp_autocast=suppress, log_suffix='')
             loss = loss_fn(output, target)
             acc1, acc5 = accuracy(output, target, topk=(1, 5))
 
-            if args.distributed:
-                reduced_loss = reduce_tensor(loss.data, args.world_size)
-                acc1 = reduce_tensor(acc1, args.world_size)
-                acc5 = reduce_tensor(acc5, args.world_size)
-            else:
-                reduced_loss = loss.data
+            reduced_loss = loss.data
 
             torch.cuda.synchronize()
 
