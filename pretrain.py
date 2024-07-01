@@ -280,7 +280,7 @@ parser.add_argument('--project_name', default=None, type=str,
                     help='set wandb project name')
 parser.add_argument('--group-name', default='YOUR_WANDB_GROUP_NAME', type=str,
                     help='set wandb group name')
-parser.add_argument('--interval_saved_epochs', default=10, type=int, metavar='EVAL_METRIC',
+parser.add_argument('--interval_saved_epochs', default=5, type=int, metavar='EVAL_METRIC',
                     help='interval_saved_epochs')
 
 # shampoo
