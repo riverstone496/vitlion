@@ -268,7 +268,7 @@ parser.add_argument('--pin-mem', action='store_true', default=False,
                     help='Pin CPU memory in DataLoader for more efficient (sometimes) transfer to GPU.')
 parser.add_argument('--no-prefetcher', action='store_true', default=False,
                     help='disable fast prefetcher')
-parser.add_argument('--output', default='', type=str, metavar='PATH',
+parser.add_argument('--output', default='ckpts', type=str, metavar='PATH',
                     help='path to output folder (default: none, current dir)')
 parser.add_argument('--experiment', default=None, type=str, metavar='NAME',
                     help='name of train experiment, name of sub-folder for output')
@@ -387,6 +387,7 @@ def main():
                 wandb.init(config=args)
             else:
                 wandb.init(config=args, project=args.project_name)
+            args.experiment = str(wandb.run.name)
         else:
             _logger.warning("You've requested to log metrics to wandb but package not found. "
                             "Metrics not being logged to wandb, try `pip install wandb`")
@@ -765,19 +766,21 @@ def main():
     best_epoch = None
     saver = None
     output_dir = None
-    # if args.rank == 0:
-    #     exp_name = '-'.join([
-    #         datetime.now().strftime("%Y%m%d-%H%M%S.%f"),
-    #         safe_model_name(args.model),
-    #         str(data_config['input_size'][-1])
-    #     ])
-    #     output_dir = get_outdir(args.output if args.output else './output/train', exp_name)
-    #     decreasing = True if eval_metric == 'loss' else False
-    #     saver = CheckpointSaver(
-    #         model=model, optimizer=optimizer, args=args, amp_scaler=loss_scaler,
-    #         checkpoint_dir=output_dir, recovery_dir=output_dir, decreasing=decreasing, max_history=args.checkpoint_hist)
-    #     with open(os.path.join(output_dir, 'args.yaml'), 'w') as f:
-    #         f.write(args_text)
+    if args.rank == 0:
+        exp_name = '-'.join([
+            datetime.now().strftime("%Y%m%d-%H%M%S.%f"),
+            safe_model_name(args.model),
+            safe_model_name(args.optimizer_name),
+            safe_model_name(args.lr),
+            str(data_config['input_size'][-1])
+        ])
+        output_dir = get_outdir(args.output if args.output else './output/train', exp_name)
+        decreasing = True if eval_metric == 'loss' else False
+        saver = CheckpointSaver(
+            model=model, optimizer=optimizer, args=args, amp_scaler=loss_scaler,
+            checkpoint_dir=output_dir, recovery_dir=output_dir, decreasing=decreasing, max_history=args.checkpoint_hist)
+        with open(os.path.join(output_dir, 'args.yaml'), 'w') as f:
+            f.write(args_text)
 
     try:
         for epoch in range(start_epoch, num_epochs):
@@ -815,21 +818,22 @@ def main():
                     log_wandb=args.log_wandb and has_wandb,
                     num_updates=num_updates)
 
-            #if saver is not None:
-            #    # save proper checkpoint with eval metric
-            #    save_metric = train_metrics[eval_metric]
-            #    best_metric, best_epoch = saver.save_checkpoint(epoch, metric=save_metric)
-            #    if args.interval_saved_epochs is not None and epoch % args.interval_saved_epochs == 0:
-            #        # only the last {args.checkpoint_hist} checkpoints will be kept
-            #        # this makes checkpoint every args.interval_saved_epochs to be saved
-            #        if args.output:
-            #            checkpoint_file = f'{args.output}/{args.experiment}/checkpoint-{epoch}.pth.tar'
-            #            target_file = f'{args.output}/{args.experiment}/held-checkpoint-{epoch}.pth.tar'
-            #        else:
-            #            checkpoint_file = f'output/train/{args.experiment}/checkpoint-{epoch}.pth.tar'
-            #            target_file = f'output/train/{args.experiment}/held-checkpoint-{epoch}.pth.tar'
-            #        if os.path.exists(checkpoint_file):
-            #            shutil.copyfile(checkpoint_file, target_file)
+            # Save checkpoint
+            if saver is not None:
+                # save proper checkpoint with eval metric
+                save_metric = train_metrics[eval_metric]
+                best_metric, best_epoch = saver.save_checkpoint(epoch, metric=save_metric)
+                if args.interval_saved_epochs is not None and epoch % args.interval_saved_epochs == 0:
+                    # only the last {args.checkpoint_hist} checkpoints will be kept
+                    # this makes checkpoint every args.interval_saved_epochs to be saved
+                    if args.output:
+                        checkpoint_file = f'{args.output}/{args.experiment}/checkpoint-{epoch}.pth.tar'
+                        target_file = f'{args.output}/{args.experiment}/held-checkpoint-{epoch}.pth.tar'
+                    else:
+                        checkpoint_file = f'output/train/{args.experiment}/checkpoint-{epoch}.pth.tar'
+                        target_file = f'output/train/{args.experiment}/held-checkpoint-{epoch}.pth.tar'
+                    if os.path.exists(checkpoint_file):
+                        shutil.copyfile(checkpoint_file, target_file)
 
     except KeyboardInterrupt:
         pass
