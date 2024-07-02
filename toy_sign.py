@@ -75,11 +75,25 @@ def train_model(args):
     elif args.optim == 'sgd_momentum':
         optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum)
     elif args.optim == 'sign_sgd':
-        optimizer = SignSGD(model.parameters(), lr=args.lr, momentum = 0)
+        optimizer = SignSGD(model.parameters(), lr=args.lr, momentum=0)
     elif args.optim == 'sign_sgd_momentum':
         optimizer = SignSGD(model.parameters(), lr=args.lr, momentum=args.momentum)
     else:
         raise ValueError("Invalid optimizer choice")
+
+    # Scheduler setup
+    if args.scheduler == 'cosine':
+        scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
+    elif args.scheduler == 'step':
+        scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=args.step_size, gamma=args.gamma)
+    elif args.scheduler == 'linear':
+        scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda epoch: args.lr * (1 - epoch / args.epochs) )
+    elif args.scheduler == 'inverse_epoch':
+        scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda epoch: args.lr / (epoch + 1))
+    elif args.scheduler == 'none':
+        scheduler = None
+    else:
+        raise ValueError("Invalid scheduler choice")
 
     if args.log_wandb:
         wandb.init(project="optimization-experiment", config=args)
@@ -92,6 +106,10 @@ def train_model(args):
         loss = criterion(outputs, y_train)
         loss.backward()
         optimizer.step()
+
+        # Step scheduler if it's being used
+        if scheduler:
+            scheduler.step()
 
         train_loss = loss.item()
 
@@ -112,11 +130,14 @@ if __name__ == "__main__":
     parser.add_argument('--optim', type=str, default='sgd', help='Optimizer choice')
     parser.add_argument('--lr', type=float, default=0.01, help='Learning rate')
     parser.add_argument('--momentum', type=float, default=0.9, help='Momentum')
-    parser.add_argument('--beta2', type=float, default=0.1, help='Momentum')
+    parser.add_argument('--beta2', type=float, default=0.99, help='Beta2 for Lion optimizer')
     parser.add_argument('--epochs', type=int, default=100, help='Number of epochs')
     parser.add_argument('--num_samples', type=int, default=200, help='Number of samples')
-    parser.add_argument('--dimension_samples', type=float, default=6, help='data vs parameters')
-    parser.add_argument('--log_wandb', action='store_true', default=False,
-                    help='log training and validation metrics to wandb')
+    parser.add_argument('--dimension_samples', type=float, default=6, help='Data vs parameters')
+    parser.add_argument('--log_wandb', action='store_true', default=False, help='Log training and validation metrics to wandb')
+    parser.add_argument('--scheduler', type=str, default='none', help='Scheduler choice')
+    parser.add_argument('--step_size', type=int, default=30, help='Step size for StepLR scheduler')
+    parser.add_argument('--gamma', type=float, default=0.1, help='Gamma for StepLR scheduler')
+
     args = parser.parse_args()
     train_model(args)
