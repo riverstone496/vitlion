@@ -1,6 +1,6 @@
 #!/bin/sh
 #$ -cwd
-#$ -l node_f=2
+#$ -l node_f=4
 #$ -l h_rt=24:00:00
 #$ -o outputs/$JOB_ID
 #$ -e errors/$JOB_ID

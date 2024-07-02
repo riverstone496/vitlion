@@ -23,13 +23,10 @@ import random as rand
 import torch
 import torch.nn as nn
 import torchvision.utils
-from torch.nn.parallel import DistributedDataParallel as NativeDDP
-
 from timm.data import create_dataset, resolve_data_config, Mixup, FastCollateMixup, AugMixDataset
 from timm.models import resume_checkpoint, model_parameters
 from timm.utils import *
 from timm.loss import LabelSmoothingCrossEntropy, SoftTargetCrossEntropy, JsdCrossEntropy
-from timm.optim import create_optimizer_v2, optimizer_kwargs
 from timm.utils import ApexScaler, NativeScaler
 
 import webdataset as wds
@@ -48,6 +45,7 @@ from torchvision import transforms
 from optimizers.lion_mvote_signle import Lion_mvote
 from optimizers.lion_mshift_single import Lion_mshift
 from optimizers.lion_single import Lion
+from optimizers.lion import Lion as Lion_Normal
 
 def print0(message):
     if dist.is_initialized():
@@ -321,6 +319,8 @@ parser.add_argument('--CIFAR10Policy', action='store_true', default=False,
                     help='use cifar dataset')
 parser.add_argument('--AugmentAll', action='store_true', default=False,
                     help='use cifar dataset')
+parser.add_argument('--scale_bs_by_client', action='store_true', default=False,
+                    help='use cifar dataset')
 def _parse_args():
     args = parser.parse_args()
 
@@ -332,6 +332,9 @@ def _parse_args():
 def main():
     setup_default_logging()
     args, args_text = _parse_args()
+
+    if args.scale_bs_by_client:
+        args.batch_size=args.batch_size // args.num_clients
 
     if args.log_weight_iters == 'None':
         args.log_weight_iters = []
@@ -635,7 +638,9 @@ def main():
         pin_memory=args.pin_mem,
         )
     require_backward_grad_sync = True
-    if args.optimizer_name == 'lion':
+    if args.optimizer_name == 'lion_normal':
+        optimizer = Lion_Normal(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay, num_clients = args.num_clients)
+    elif args.optimizer_name == 'lion':
         optimizer = Lion(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay, num_clients = args.num_clients)
     elif args.optimizer_name == 'lion_mvote':
         optimizer = Lion_mvote(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay, num_clients = args.num_clients)
@@ -796,7 +801,6 @@ def train_one_epoch(
         elif mixup_fn is not None:
             mixup_fn.mixup_enabled = False
 
-    cos_func = torch.nn.CosineSimilarity(dim=0)
     second_order = hasattr(optimizer, 'is_second_order') and optimizer.is_second_order
     batch_time_m = AverageMeter()
     data_time_m = AverageMeter()
