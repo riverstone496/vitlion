@@ -8,3 +8,4 @@ from .lion_com_bf16 import LionComBF16
 from .eflion import EfLion
 from .signsgd import SignSGD
 from .efsignsgd import EFSignSGD
+from .original_efsignsgd import ErrorFeedbackSGD
