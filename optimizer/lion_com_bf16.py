@@ -11,7 +11,7 @@ def exists(val):
     return val is not None
 
 # update functions
-def compute_updates_sign(params, grads, exp_avgs, lr, wd, beta1):
+def compute_updates_sign(params, grads, exp_avgs, lr, wd, beta1, beta2):
     """
     Compute the sign-based updates for all parameters and aggregate them into a single vector.
     """
@@ -21,10 +21,9 @@ def compute_updates_sign(params, grads, exp_avgs, lr, wd, beta1):
         p.data.mul_(1 - lr * wd)
         # Compute update: update = sign(beta1 * exp_avg + (1 - beta1) * grad)
         update = exp_avg.mul(beta1).add(grad, alpha=1 - beta1).sign_()
-        updates.append(update.flatten())
-    # Concatenate all updates into a single vector
-    update_vector = torch.cat(updates)
-    return update_vector
+        p.add_(update, alpha=-lr)
+        # decay the momentum running average coefficient
+        exp_avg.mul_(beta2).add_(grad, alpha=1 - beta2)
 
 # class
 class LionComBF16(Optimizer):
@@ -95,38 +94,7 @@ class LionComBF16(Optimizer):
         else:
             elapsed_time = 0.0
         # 変更点終了
-
-        # Compute updates for all parameters and aggregate into a single vector
-        update_vector = compute_updates_sign(params, grads, exp_avgs, lr, wd, beta1)
-
-        # 変更点開始: update_vector に対する all_reduce を削除
-        # update_vector の all_reduce を行わないため、この部分を削除またはコメントアウトします。
-        # if torch.distributed.is_initialized():
-        #     torch.cuda.synchronize()  # Ensure all previous operations are complete
-        #     start_time = time.time()
-        #     all_reduce(update_vector, op=ReduceOp.SUM)
-        #     torch.cuda.synchronize()  # Ensure all_reduce is complete
-        #     elapsed_time = time.time() - start_time
-        #     # Normalize the update if necessary (e.g., divide by world size)
-        #     world_size = torch.distributed.get_world_size()
-        #     update_vector /= world_size
-        # else:
-        #     elapsed_time = 0.0
-        # 変更点終了
-
-        # Apply the updates back to each parameter
-        idx = 0  # Pointer to traverse the update_vector
-        for p, exp_avg in zip(params, exp_avgs):
-            numel = p.numel()
-            # Extract the corresponding update for this parameter
-            update = update_vector[idx:idx + numel].view_as(p)
-            idx += numel
-            # Apply the update
-            p.add_(update, alpha=-lr)
-            # Update the exponential moving average
-            exp_avg_prev = exp_avg.clone().detach()
-            exp_avg.mul_(beta2).add_(p.grad, alpha=1 - beta2)
-
         self.elapsed_time = elapsed_time
-        self.numel = idx
+        # Compute updates for all parameters and aggregate into a single vector
+        compute_updates_sign(params, grads, exp_avgs, lr, wd, beta1, beta2)
         return loss
