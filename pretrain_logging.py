@@ -665,6 +665,20 @@ def main():
         args.optimizer_name = 'lion'
     if args.optimizer_name == 'lion':
         optimizer = Lion(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
+    elif args.optimizer_name == 'lion_mvote':
+        optimizer = Lion_MVote(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
+        model.require_backward_grad_sync = False
+        require_backward_grad_sync = False
+    elif args.optimizer_name == 'lion_mshift':
+        optimizer = Lion_mshift(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
+        model.require_backward_grad_sync = False
+        require_backward_grad_sync = False
+    elif args.optimizer_name == 'lion_mean':
+        optimizer = Lion_Mean(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
+        model.require_backward_grad_sync = False
+        require_backward_grad_sync = False
+    elif args.optimizer_name == 'sign_mvote':
+        optimizer = Sign_MVote(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
     elif args.optimizer_name == 'adamw':
         optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
     elif args.optimizer_name == 'sgd':
@@ -886,6 +900,74 @@ def train_one_epoch(
         torch.cuda.synchronize()
         num_updates += 1
         batch_time_m.update(time.time() - end)
+
+        state_info = None
+        if args.log_optimizer_state and args.rank == 0:
+            if num_updates % args.log_interval == 0:
+                state_info = {}
+                for p in optimizer.state.keys():
+                    param_name = param_name_dict[p]
+                    weight = p.data
+                    grad = p.grad
+                    momentum = optimizer.state[p]["exp_avg"]
+                    state_info['weight_norm/'+param_name] = torch.norm(p.data).item()
+                    state_info['grad_norm/'+param_name] = torch.norm(p.grad).item()
+                    state_info['momentum_norm/'+param_name] = torch.norm(momentum).item()
+                    state_info['weight_norm_element/'+param_name] = torch.abs(p.data).mean(dtype=torch.float32).item()
+                    state_info['grad_norm_element/'+param_name] = torch.abs(p.grad).mean(dtype=torch.float32).item()
+                    state_info['momentum_norm_element/'+param_name] = torch.abs(momentum).mean(dtype=torch.float32).item()
+                    if param_name in prev_weight_dict.keys():
+                        prev_weight = prev_weight_dict[param_name]
+                        state_info['weight_relative_error/'+param_name] = torch.norm(weight - prev_weight).item() / state_info['weight_norm/'+param_name]
+                        state_info['weight_relative_error_element/'+param_name] = torch.abs(grad - prev_weight).mean(dtype=torch.float32).item() / state_info['weight_norm_element/'+param_name]
+                        state_info['weight_cosine_sim/'+param_name] = cos_func(weight.view(-1), prev_weight.view(-1))
+                        state_info['weight_norm_ratio/'+param_name] = state_info['weight_norm/'+param_name] / torch.norm(prev_weight).item()
+                        state_info['weight_norm_element_ratio/'+param_name] = state_info['weight_norm_element/'+param_name] / torch.abs(prev_weight).mean(dtype=torch.float32).item()
+                    if param_name in prev_grad_dict.keys():
+                        prev_grad = prev_grad_dict[param_name]
+                        state_info['grad_relative_error/'+param_name] = torch.norm(grad - prev_grad).item() / state_info['grad_norm/'+param_name]
+                        state_info['grad_relative_error_element/'+param_name] = torch.abs(grad - prev_grad).mean(dtype=torch.float32).item() / state_info['grad_norm_element/'+param_name]
+                        state_info['grad_cosine_sim/'+param_name] = cos_func(grad.view(-1), prev_grad.view(-1))
+                        state_info['grad_norm_ratio/'+param_name] = state_info['grad_norm/'+param_name] / torch.norm(prev_grad).item()
+                        state_info['grad_norm_element_ratio/'+param_name] = state_info['grad_norm_element/'+param_name] / torch.abs(prev_grad).mean(dtype=torch.float32).item()
+                    if param_name in prev_momentum_dict.keys() and args.momentum != 1:
+                        prev_momentum = prev_momentum_dict[param_name]
+                        state_info['momentum_relative_error/'+param_name] = torch.norm(momentum - prev_momentum) / state_info['momentum_norm/'+param_name]
+                        state_info['momentum_relative_error_element/'+param_name] = torch.abs(momentum - prev_momentum).mean(dtype=torch.float32).item() / state_info['momentum_norm_element/'+param_name]
+                        state_info['momentum_cosine_sim/'+param_name] = cos_func(momentum.view(-1), prev_momentum.view(-1))
+                        state_info['momentum_norm_ratio/'+param_name] = state_info['momentum_norm/'+param_name]/ torch.norm(prev_momentum).item()
+                        state_info['momentum_norm_element_ratio/'+param_name] = state_info['momentum_norm_element/'+param_name] / torch.abs(prev_momentum).mean(dtype=torch.float32).item()
+                    if param_name in prev_grad_dict.keys() and param_name in prev_momentum_dict.keys() and args.momentum != 1:
+                        update = momentum.clone().mul_(args.momentum).add(grad, alpha=1 - args.momentum).sign_()
+                        prev_update = prev_momentum.clone().mul_(args.momentum).add(prev_grad, alpha=1 - args.momentum).sign_()
+                        state_info['update_relative_error/'+param_name] = torch.norm(update - prev_update) / torch.norm(update)
+                        state_info['update_relative_error_element/'+param_name] = torch.abs(update - prev_update).mean(dtype=torch.float32).item() / torch.abs(update).mean(dtype=torch.float32).item()
+                        state_info['update_cosine_sim/'+param_name] = cos_func(update.view(-1), prev_update.view(-1))
+                        state_info['update_norm_ratio/'+param_name] = torch.norm(update)/ torch.norm(prev_update).item()
+                        state_info['update_norm_element_ratio/'+param_name] = torch.abs(update).mean(dtype=torch.float32).item() / torch.abs(prev_update).mean(dtype=torch.float32).item()
+                
+            # Save Previous Information
+            if num_updates % args.log_interval == args.log_interval-args.state_interval:
+                if args.log_optimizer_state:
+                    for p in optimizer.state.keys():
+                        param_name = param_name_dict[p]
+                        prev_weight_dict[param_name] = p.data.detach().clone()
+                        prev_grad_dict[param_name] = p.grad.detach().clone()
+                        if args.momentum != 0:
+                            prev_momentum_dict[param_name] = optimizer.state[p]["exp_avg"].detach().clone()
+
+            if str(num_updates) in args.log_weight_iters:
+                if args.log_wandb:
+                    log_dict = {
+                        "iter": num_updates,
+                    }
+                    for p in optimizer.state.keys():
+                        param_name = param_name_dict[p]
+                        grad = p.grad
+                        momentum = optimizer.state[p]["exp_avg"]
+                        log_dict['gradient/'+param_name] = wandb.Histogram(grad.cpu().detach().numpy())
+                        log_dict['momentum/'+param_name] = wandb.Histogram(momentum.cpu().detach().numpy())
+                    wandb.log(log_dict, step=num_updates)
 
         if last_batch or num_updates % args.log_interval == 0:
             lrl = [param_group['lr'] for param_group in optimizer.param_groups]
