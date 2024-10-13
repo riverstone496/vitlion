@@ -12,7 +12,7 @@ def update_fn(p, grad, exp_avg, memory, lr, wd, beta1):
     # stepweight decay
     p.data.mul_(1 - lr * wd)
     # weight update
-    exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
+    exp_avg.mul_(beta1).add_(grad, alpha=1)
     d_p = lr*exp_avg.clone()
     corrected_gradient = lr*(d_p + memory).sign_()
     p.add_(corrected_gradient, alpha=-1)
