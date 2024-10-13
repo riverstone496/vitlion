@@ -41,7 +41,7 @@ from models.factory import create_model, safe_model_name
 from scheduler.scheduler_factory import create_scheduler
 from utils.summary import original_update_summary
 
-from models.resnet import ResNet18, ResNet34, ResNet50
+from models.resnet import ResNet18, ResNet34, ResNet50, ResNet101, ResNet152
 from models.vgg import VGG
 from models.wideresnet import WideResNet
 from torchvision import transforms
@@ -582,6 +582,10 @@ if __name__ == '__main__':
             model = ResNet34(num_classes=args.num_classes)
         elif args.model == 'resnet50':
             model = ResNet50(num_classes=args.num_classes)
+        elif args.model == 'resnet101':
+            model = ResNet101(num_classes=args.num_classes)
+        elif args.model == 'resnet152':
+            model = ResNet152(num_classes=args.num_classes)
         elif args.model == 'wideresnet16':
             model = WideResNet(depth=16, num_classes=args.num_classes, widen_factor=8, dropRate=args.drop)
         elif args.model == 'wideresnet28':
