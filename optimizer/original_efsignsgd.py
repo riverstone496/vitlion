@@ -71,23 +71,18 @@ class ErrorFeedbackSGD(Optimizer):
     """
 
     def __init__(self, params, lr=required, momentum=0, dampening=0,
-                 weight_decay=0, nesterov=False, comp='sign', memory=True):
+                 weight_decay=0, nesterov=False):
         if lr is not required and lr < 0.0:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if momentum < 0.0:
             raise ValueError("Invalid momentum value: {}".format(momentum))
         if weight_decay < 0.0:
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
-        if comp == 'scaled_sign':
-            comp = scaled_sign
-        elif comp == 'sign':
-            comp = unscaled_sign
-        elif not callable(comp) and comp is not None:
-            raise ValueError("Invalid comp value: {} (must be callable or None)".format(comp))
+        comp = unscaled_sign
 
         defaults = dict(lr=lr, momentum=momentum, dampening=dampening,
                         weight_decay=weight_decay, nesterov=nesterov,
-                        comp=comp, memory=memory)
+                        comp=comp)
 
         if nesterov and (momentum <= 0 or dampening != 0):
             raise ValueError("Nesterov momentum requires a momentum and zero dampening")
@@ -125,7 +120,6 @@ class ErrorFeedbackSGD(Optimizer):
             dampening = group['dampening']
             nesterov = group['nesterov']
             comp = group['comp']
-            memory = group['memory']
 
             for p in group['params']:
                 param_state = self.state[p]
@@ -154,17 +148,13 @@ class ErrorFeedbackSGD(Optimizer):
 
                 # Save the corrected gradient to compute the norms
                 param_state['corrected_gradient'] = corrected_gradient
-
-                if comp is not None:
-                    corrected_gradient = comp(corrected_gradient)
+                corrected_gradient = comp(corrected_gradient)
 
                 ''' hack to scale the signed gradient by the learning
                     rate since torch.sign(x) ignores the learning rate '''
-                if comp == unscaled_sign:
-                    corrected_gradient = group['lr'] * corrected_gradient
+                corrected_gradient = group['lr'] * corrected_gradient
 
-                if memory:
-                    param_state['memory'] = param_state['memory'] + d_p - corrected_gradient
+                param_state['memory'] = param_state['memory'] + d_p - corrected_gradient
 
                 p.data.add_(-1, corrected_gradient)
 
