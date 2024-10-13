@@ -283,25 +283,8 @@ parser.add_argument('--interval_saved_epochs', default=5, type=int, metavar='EVA
 
 # shampoo
 parser.add_argument('--beta2', default=0.85, type=float)
-parser.add_argument('--matrix_eps', default=1.0e-6, type=float)
-parser.add_argument('--start_preconditioning_step', default=25, type=int)
-parser.add_argument('--preconditioning_compute_steps', default=10, type=int)
-parser.add_argument('--statistics_compute_steps', default=10, type=int)
-parser.add_argument('--early_phase_ratio', default=0, type=float)
-parser.add_argument('--early_preconditioning_compute_steps', default=10, type=int)
-parser.add_argument('--early_statistics_compute_steps', default=100, type=int)
-parser.add_argument('--shampoo_block_size', default=128, type=int)
 parser.add_argument('--gradient_value_clip', default=-1, type=float)
-parser.add_argument('--grafting', default='AdaGrad', type=str, choices=['None', 'SGD', 'AdaGrad'])
 
-parser.add_argument('--interval_cosine_thres', default=-1, type=float)
-parser.add_argument('--interval_scheduling_factor', default=1, type=float)
-parser.add_argument('--inverse_exponent', default=0, type=float)
-parser.add_argument('--use_inverse', action='store_true', default=False,
-                    help='shampoo_inverse')
-parser.add_argument('--dmp_opt', default='mean', type=str)
-
-parser.add_argument("--log_weight_iters", type=str, default='None', help="Interval to the previous optimizer state")
 parser.add_argument('--sync_momentum', type=int, default=-1, help='Number of warmup iterations')
 parser.add_argument('--k_sync_momentum', type=int, default=-1, help='Number of warmup iterations')
 parser.add_argument('--max_iters_sync_momentum', type=int, default=-1, help='Number of warmup iterations')
@@ -348,6 +331,13 @@ def train_one_epoch(
     end = time.time()
     last_idx = len(loader) - 1
     num_updates = epoch * len(loader)
+
+    train_time = 0
+    forward_time = 0
+    backward_time = 0
+    step_time = 0
+    comm_time = 0
+
     for batch_idx, (input, target) in enumerate(loader):
         last_batch = batch_idx == last_idx
         data_time_m.update(time.time() - end)
@@ -356,9 +346,13 @@ def train_one_epoch(
             if mixup_fn is not None:
                 input, target = mixup_fn(input, target)
 
+        torch.cuda.synchronize() 
+        train_start_time = time.time()
         with amp_autocast():
             output = model(input)
             loss = loss_fn(output, target)
+        torch.cuda.synchronize() 
+        forward_time += time.time() - train_start_time
 
         if not args.distributed:
             losses_m.update(loss.item(), input.size(0))
@@ -371,12 +365,19 @@ def train_one_epoch(
                 parameters=model_parameters(model, exclude_head='agc' in args.clip_mode),
                 create_graph=second_order)
         if loss_scaler is None:
+            torch.cuda.synchronize() 
+            start_time = time.time()
             loss.backward(create_graph=second_order)
             if args.clip_grad is not None:
                 dispatch_clip_grad(
                     model_parameters(model, exclude_head='agc' in args.clip_mode),
                     value=args.clip_grad, mode=args.clip_mode)
+            torch.cuda.synchronize() 
+            backward_time += time.time() - start_time
+            start_time = time.time()
             optimizer.step()
+            torch.cuda.synchronize() 
+            step_time += time.time() - start_time
 
         torch.cuda.synchronize()
         if args.sync_momentum>0 and num_updates % args.sync_momentum == 0 and num_updates <= args.max_iters_sync_momentum:
@@ -387,6 +388,11 @@ def train_one_epoch(
             total_sync_momentum += 1
         num_updates += 1
         batch_time_m.update(time.time() - end)
+
+        train_time += train_start_time - time.time()
+
+        if hasattr(optimizer, 'elapsed_time'):
+            comm_time += optimizer.elapsed_time
 
         if last_batch or num_updates % args.log_interval == 0:
             lrl = [param_group['lr'] for param_group in optimizer.param_groups]
@@ -435,12 +441,15 @@ def train_one_epoch(
             lr_scheduler.step_update(num_updates=num_updates, metric=losses_m.avg)
 
         end = time.time()
+        train_all_time += train_time
         # end for
 
     if hasattr(optimizer, 'sync_lookahead'):
         optimizer.sync_lookahead()
 
-    return OrderedDict([('loss', losses_m.avg)])
+    return OrderedDict([('loss', losses_m.avg), ('train_all_time', train_all_time), ('train_time', train_time), 
+                        ('forward_time', forward_time), ('backward_time', backward_time),
+                        ('step_time', step_time), ('comm_time', comm_time)])
 
 def validate(model, loader, loss_fn, args, amp_autocast=suppress, log_suffix=''):
     batch_time_m = AverageMeter()
@@ -509,11 +518,7 @@ if __name__ == '__main__':
     setup_default_logging()
     args, args_text = _parse_args()
     momentum_iters = calculate_Tv(args.max_iters, args.k_sync_momentum)
-
-    if args.log_weight_iters == 'None':
-        args.log_weight_iters = []
-    else:
-        args.log_weight_iters = args.log_weight_iters.split(',')
+    train_all_time = 0
 
     args.prefetcher = not args.no_prefetcher
     args.distributed = int(os.getenv('OMPI_COMM_WORLD_SIZE', '1')) > 1
