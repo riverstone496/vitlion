@@ -18,7 +18,8 @@ from contextlib import suppress
 from datetime import datetime
 import copy
 import math
-import random as rand
+from torch.utils.data.dataset import Subset
+import numpy as np
 
 import torch
 import torch.nn as nn
@@ -321,6 +322,8 @@ parser.add_argument('--AugmentAll', action='store_true', default=False,
                     help='use cifar dataset')
 parser.add_argument('--scale_bs_by_client', action='store_true', default=False,
                     help='use cifar dataset')
+parser.add_argument("--train_size", type=int, default=-1, help="Frequency for sync momentum")
+
 def _parse_args():
     args = parser.parse_args()
 
@@ -550,6 +553,12 @@ def main():
                                         download=True,
                                         transform = val_transform)
         
+        if args.train_size != -1:
+            indices = list(range(len(dataset_train)))
+            np.random.shuffle(indices)
+            train_idx = indices[:args.train_size]
+            dataset_train = Subset(dataset_train, train_idx)
+
         loader_train = torch.utils.data.DataLoader(dataset=dataset_train,
                                                     batch_size=args.batch_size,
                                                     shuffle=True,

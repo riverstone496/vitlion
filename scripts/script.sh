@@ -1,7 +1,7 @@
 #!/bin/sh
 #$ -cwd
 #$ -l node_f=4
-#$ -l h_rt=24:00:00
+#$ -l h_rt=12:00:00
 #$ -o outputs/$JOB_ID
 #$ -e errors/$JOB_ID
 #$ -p -5
@@ -38,10 +38,10 @@ mpirun -np $NUM_GPUS \
      -x MASTER_PORT=$MASTER_PORT \
      -bind-to none \
      -x PATH \
-     python pretrain.py  --model resnet50  --lr 3e-3 --weight-decay 1 --beta2 0.99 --momentum_sync_freq 1000 \
+     python pretrain.py  --model resnet50  --lr 3e-4 --weight-decay 1 --beta2 0.99 --momentum_sync_freq 0 \
         --input-size 3 224 224 --project_name lion_imagenet\
         --sched cosine_iter --epochs 90 \
-        --batch-size 1024 --optimizer_name lion_mvote --num-classes 1000 \
+        --batch-size 1024 --optimizer_name lion --num-classes 1000 \
         --warmup-epochs 5 --cooldown-epochs 0 \
         --smoothing 0.1 --drop-path 0.1 --aa rand-m9-mstd0.5-inc1 \
         --repeated-aug --mixup 0.8 --cutmix 1.0 --reprob 0.25 \
