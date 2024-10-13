@@ -45,11 +45,7 @@ from models.resnet import ResNet18, ResNet34, ResNet50
 from models.vgg import VGG
 from models.wideresnet import WideResNet
 from torchvision import transforms
-from optimizers.lion import Lion
-from optimizers.lion_mshift import Lion_mshift
-from optimizers.lion_mvote import Lion_MVote
-from optimizers.sign_mvote import Sign_MVote
-from optimizers.lionmean import Lion_Mean
+from optimizer import Lion, LionCom, LionComBF16, SignLion, GradLion, GradLionBf16
 
 def print0(message):
     if dist.is_initialized():
@@ -303,11 +299,13 @@ parser.add_argument('--use_inverse', action='store_true', default=False,
                     help='shampoo_inverse')
 parser.add_argument('--dmp_opt', default='mean', type=str)
 
-parser.add_argument('--log_optimizer_state', action='store_true', default=False)
-parser.add_argument("--state_interval", type=int, default=1, help="Interval to the previous optimizer state")
 parser.add_argument("--log_weight_iters", type=str, default='None', help="Interval to the previous optimizer state")
-parser.add_argument('--ckpo_with_current_time', action='store_true', default=False)
-parser.add_argument("--momentum_sync_freq", type=int, default=1, help="Frequency for sync momentum")
+parser.add_argument('--sync_momentum', type=int, default=-1, help='Number of warmup iterations')
+parser.add_argument('--k_sync_momentum', type=int, default=-1, help='Number of warmup iterations')
+parser.add_argument('--max_iters_sync_momentum', type=int, default=-1, help='Number of warmup iterations')
+
+parser.add_argument('--wo_infiniband', action='store_true', help='Compile the model using PyTorch 2.0')
+parser.add_argument('--cluster', type=str, default=None, help='Distributed backend')
 
 # CIFAR Dataset
 parser.add_argument('--use_cifar', action='store_true', default=False,
@@ -425,12 +423,6 @@ def main():
         assert hasattr(model, 'num_classes'), 'Model must have `num_classes` attr if not set on cmd line/config.'
         args.num_classes = model.num_classes  # FIXME handle model default vs config num_classes more elegantly
 
-    param_name_dict = {}
-    prev_weight_dict = {}
-    prev_grad_dict = {}
-    prev_momentum_dict = {}
-    for name, param in model.named_parameters():
-        param_name_dict[param] = name
 
     if args.rank == 0:
         _logger.info(
@@ -659,12 +651,14 @@ def main():
         pin_memory=args.pin_mem,
         )
     require_backward_grad_sync = True
-    if args.optimizer_name == 'lion_mshift' and args.momentum_sync_freq ==0:
-        args.optimizer_name = 'lion'
-    if args.optimizer_name == 'lion_mvote' and args.momentum_sync_freq ==0:
-        args.optimizer_name = 'lion'
     if args.optimizer_name == 'lion':
         optimizer = Lion(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
+    elif args.optimizer_name == 'sign_lion':
+        optimizer = SignLion(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
+    elif args.optimizer_name == 'com_lion':
+        optimizer = LionCom(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
+    elif args.optimizer_name == 'com_lion_bf16':
+        optimizer = LionComBF16(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
     elif args.optimizer_name == 'adamw':
         optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
     elif args.optimizer_name == 'sgd':
@@ -778,8 +772,7 @@ def main():
             train_metrics = train_one_epoch(
                 epoch, model, loader_train, optimizer, train_loss_fn, args,
                 lr_scheduler=lr_scheduler, saver=saver, output_dir=output_dir,
-                amp_autocast=amp_autocast, loss_scaler=loss_scaler, mixup_fn=mixup_fn,
-                param_name_dict = param_name_dict, prev_weight_dict=prev_weight_dict,prev_grad_dict=prev_grad_dict,prev_momentum_dict=prev_momentum_dict)
+                amp_autocast=amp_autocast, loss_scaler=loss_scaler, mixup_fn=mixup_fn)
             
             ## EVAL
             num_updates = (epoch+1) * len(loader_train)
@@ -830,8 +823,7 @@ def main():
 def train_one_epoch(
         epoch, model, loader, optimizer, loss_fn, args,
         lr_scheduler=None, saver=None, output_dir=None, amp_autocast=suppress,
-        loss_scaler=None, mixup_fn=None,
-        param_name_dict = None, prev_weight_dict=None,prev_grad_dict=None,prev_momentum_dict=None):
+        loss_scaler=None, mixup_fn=None):
 
     if args.mixup_off_epoch and epoch >= args.mixup_off_epoch:
         if args.prefetcher and loader.mixup_enabled:
@@ -839,7 +831,6 @@ def train_one_epoch(
         elif mixup_fn is not None:
             mixup_fn.mixup_enabled = False
 
-    cos_func = torch.nn.CosineSimilarity(dim=0)
     second_order = hasattr(optimizer, 'is_second_order') and optimizer.is_second_order
     batch_time_m = AverageMeter()
     data_time_m = AverageMeter()
@@ -878,10 +869,7 @@ def train_one_epoch(
                 dispatch_clip_grad(
                     model_parameters(model, exclude_head='agc' in args.clip_mode),
                     value=args.clip_grad, mode=args.clip_mode)
-            if args.optimizer_name == 'lion_mshift' or args.optimizer_name == 'lion_mvote':
-                optimizer.step(sync_momentum = (num_updates % args.momentum_sync_freq==0))
-            else:
-                optimizer.step()
+            optimizer.step()
 
         torch.cuda.synchronize()
         num_updates += 1
@@ -915,8 +903,6 @@ def train_one_epoch(
 
                 if args.log_wandb:
                     log_dict = {'epoch' : epoch, 'iter': num_updates, 'lr': lr, 'loss':losses_m.val}
-                    if state_info is not None:
-                        log_dict.update(state_info)
                     wandb.log(log_dict)
                 if math.isnan(losses_m.val):
                     break
