@@ -517,7 +517,6 @@ def create_max_eigen_list(eig_dict):
 if __name__ == '__main__':
     setup_default_logging()
     args, args_text = _parse_args()
-    momentum_iters = calculate_Tv(args.max_iters, args.k_sync_momentum)
     train_all_time = 0
 
     args.prefetcher = not args.no_prefetcher
@@ -913,6 +912,7 @@ if __name__ == '__main__':
 
     # setup learning rate schedule and starting epoch
     iter_per_epoch = len(loader_train)
+    momentum_iters = calculate_Tv(iter_per_epoch, args.k_sync_momentum)
     lr_scheduler, num_iters = create_scheduler(args, optimizer, len(loader_train))
     num_epochs = args.epochs + args.cooldown_epochs
     start_epoch = 0
