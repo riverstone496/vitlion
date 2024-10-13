@@ -13,10 +13,10 @@ def update_fn(p, grad, exp_avg, memory, lr, wd, beta1):
     p.data.mul_(1 - lr * wd)
     # weight update
     exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
-    update = exp_avg.clone()
-    pt = (update + memory).sign_()
-    p.add_(pt, alpha=-lr)
-    memory.copy_(update).add_(pt, alpha=-1)
+    d_p = lr*exp_avg.clone()
+    corrected_gradient = lr*(d_p + memory).sign_()
+    p.add_(corrected_gradient, alpha=-1)
+    memory.add_(d_p).add_(corrected_gradient, alpha=-1)
     # decay the momentum running average coefficient
 
 # class

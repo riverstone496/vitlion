@@ -12,12 +12,12 @@ def update_fn(p, grad, exp_avg, memory, lr, wd, beta1, beta2):
     # stepweight decay
     p.data.mul_(1 - lr * wd)
     # weight update
-    pt = exp_avg.clone().mul_(beta1).add(grad, alpha=1 - beta1)
-    update = (pt + memory).sign_()
-    p.add_(update, alpha=-lr)
+    d_p = exp_avg.clone().mul_(beta1).add(grad, alpha=1 - beta1)
+    corrected_gradient = (d_p + memory).sign_()
+    p.add_(corrected_gradient, alpha=-lr)
     # decay the momentum running average coefficient
     exp_avg.mul_(beta2).add_(grad, alpha=1 - beta2)
-    memory.copy_(update).add_(pt, alpha=-1)
+    memory.add_(d_p).add_(corrected_gradient, alpha=-1)
 
 # class
 class EfLion(Optimizer):
