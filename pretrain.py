@@ -303,6 +303,8 @@ parser.add_argument('--CIFAR10Policy', action='store_true', default=False,
                     help='use cifar dataset')
 parser.add_argument('--AugmentAll', action='store_true', default=False,
                     help='use cifar dataset')
+parser.add_argument('--log_wandb', action='store_true', help='Enable WandB logging')
+
 def _parse_args():
     args = parser.parse_args()
 
@@ -447,9 +449,9 @@ def train_one_epoch(
     if hasattr(optimizer, 'sync_lookahead'):
         optimizer.sync_lookahead()
 
-    return OrderedDict([('loss', losses_m.avg), ('train_all_time', train_all_time), ('train_time', train_time), 
-                        ('forward_time', forward_time), ('backward_time', backward_time),
-                        ('step_time', step_time), ('comm_time', comm_time)])
+    return OrderedDict([('loss', losses_m.avg), ('all_time', train_all_time), ('time', train_time / iter_per_epoch), 
+                        ('forward_time', forward_time/ iter_per_epoch), ('backward_time', backward_time/ iter_per_epoch),
+                        ('step_time', step_time/ iter_per_epoch), ('comm_time', comm_time/ iter_per_epoch)])
 
 def validate(model, loader, loss_fn, args, amp_autocast=suppress, log_suffix=''):
     batch_time_m = AverageMeter()
@@ -963,9 +965,9 @@ if __name__ == '__main__':
         ])
         output_dir = get_outdir(args.output if args.output else './output/train', exp_name)
         decreasing = True if eval_metric == 'loss' else False
-        saver = CheckpointSaver(
-            model=model, optimizer=optimizer, args=args, amp_scaler=loss_scaler,
-            checkpoint_dir=output_dir, recovery_dir=output_dir, decreasing=decreasing, max_history=args.checkpoint_hist)
+        # saver = CheckpointSaver(
+        #     model=model, optimizer=optimizer, args=args, amp_scaler=loss_scaler,
+        #     checkpoint_dir=output_dir, recovery_dir=output_dir, decreasing=decreasing, max_history=args.checkpoint_hist)
         with open(os.path.join(output_dir, 'args.yaml'), 'w') as f:
             f.write(args_text)
 
@@ -978,7 +980,7 @@ if __name__ == '__main__':
 
             train_metrics = train_one_epoch(
                 epoch, model, loader_train, optimizer, train_loss_fn, args,
-                lr_scheduler=lr_scheduler, saver=saver, output_dir=output_dir,
+                lr_scheduler=lr_scheduler, saver=None, output_dir=output_dir,
                 amp_autocast=amp_autocast, loss_scaler=loss_scaler, mixup_fn=mixup_fn)
             
             ## EVAL
@@ -1005,21 +1007,21 @@ if __name__ == '__main__':
                     num_updates=num_updates)
 
             # Save checkpoint
-            if saver is not None:
-                # save proper checkpoint with eval metric
-                save_metric = train_metrics[eval_metric]
-                best_metric, best_epoch = saver.save_checkpoint(epoch, metric=save_metric)
-                if args.interval_saved_epochs is not None and epoch % args.interval_saved_epochs == 0:
-                    # only the last {args.checkpoint_hist} checkpoints will be kept
-                    # this makes checkpoint every args.interval_saved_epochs to be saved
-                    if args.output:
-                        checkpoint_file = f'{args.output}/{args.experiment}/checkpoint-{epoch}.pth.tar'
-                        target_file = f'{args.output}/{args.experiment}/held-checkpoint-{epoch}.pth.tar'
-                    else:
-                        checkpoint_file = f'output/train/{args.experiment}/checkpoint-{epoch}.pth.tar'
-                        target_file = f'output/train/{args.experiment}/held-checkpoint-{epoch}.pth.tar'
-                    if os.path.exists(checkpoint_file):
-                        shutil.copyfile(checkpoint_file, target_file)
+            # if saver is not None:
+            #     # save proper checkpoint with eval metric
+            #     save_metric = train_metrics[eval_metric]
+            #     best_metric, best_epoch = saver.save_checkpoint(epoch, metric=save_metric)
+            #     if args.interval_saved_epochs is not None and epoch % args.interval_saved_epochs == 0:
+            #         # only the last {args.checkpoint_hist} checkpoints will be kept
+            #         # this makes checkpoint every args.interval_saved_epochs to be saved
+            #         if args.output:
+            #             checkpoint_file = f'{args.output}/{args.experiment}/checkpoint-{epoch}.pth.tar'
+            #             target_file = f'{args.output}/{args.experiment}/held-checkpoint-{epoch}.pth.tar'
+            #         else:
+            #             checkpoint_file = f'output/train/{args.experiment}/checkpoint-{epoch}.pth.tar'
+            #             target_file = f'output/train/{args.experiment}/held-checkpoint-{epoch}.pth.tar'
+            #         if os.path.exists(checkpoint_file):
+            #             shutil.copyfile(checkpoint_file, target_file)
 
     except KeyboardInterrupt:
         pass
