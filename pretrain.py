@@ -272,8 +272,6 @@ parser.add_argument('--experiment', default=None, type=str, metavar='NAME',
                     help='name of train experiment, name of sub-folder for output')
 parser.add_argument('--eval-metric', default='top1', type=str, metavar='EVAL_METRIC',
                     help='Best metric (default: "top1"')
-parser.add_argument('--log-wandb', action='store_true', default=False,
-                    help='log training and validation metrics to wandb')
 parser.add_argument('--project_name', default=None, type=str,
                     help='set wandb project name')
 parser.add_argument('--group-name', default='YOUR_WANDB_GROUP_NAME', type=str,
@@ -391,7 +389,7 @@ def train_one_epoch(
         num_updates += 1
         batch_time_m.update(time.time() - end)
 
-        train_time += train_start_time - time.time()
+        train_time += time.time() - train_start_time
 
         if hasattr(optimizer, 'elapsed_time'):
             comm_time += optimizer.elapsed_time
@@ -859,10 +857,10 @@ if __name__ == '__main__':
         optimizer = GradLionBf16(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
         require_backward_grad_sync = False
     elif args.optimizer_name == 'signsgd':
-        optimizer = SignSGD(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
+        optimizer = SignSGD(model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
         require_backward_grad_sync = False
     elif args.optimizer_name == 'ef_signsgd':
-        optimizer = EFSignSGD(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
+        optimizer = EFSignSGD(model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
         require_backward_grad_sync = False
     elif args.optimizer_name == 'ef_lion':
         optimizer = EfLion(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
