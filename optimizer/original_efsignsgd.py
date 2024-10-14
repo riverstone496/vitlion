@@ -2,15 +2,6 @@ import numpy as np
 import torch
 from torch.optim.optimizer import Optimizer, required
 
-
-def scaled_sign(x):
-    """
-    :param x: torch Tensor
-    :return: The sign tensor scaled by it's L1 norm and divided by the number of elements
-    """
-    return x.norm(p=1) / x.nelement() * torch.sign(x)
-
-
 def unscaled_sign(x):
     """
     This is the standard sign compression. It has been experimented to give worse test accuracies than the scaled
