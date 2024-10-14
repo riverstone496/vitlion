@@ -9,3 +9,4 @@ from .eflion import EfLion
 from .signsgd import SignSGD
 from .efsignsgd import EFSignSGD
 from .original_efsignsgd import ErrorFeedbackSGD
+from .lionwosign import LionWoSign
