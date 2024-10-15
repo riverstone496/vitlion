@@ -11,20 +11,11 @@ def update_fn(p, grad, exp_avg, memory, lr, wd, beta1, beta2):
     # Weight Decayを勾配に直接適用
     if wd != 0:
         grad = grad + wd * p.data
-    
-    # モメンタムの更新
+    # make update vector
     d_p = lr * exp_avg.clone().mul_(beta1).add(grad, alpha=1 - beta1)
-    
-    # 圧縮された勾配の計算
     corrected_gradient = lr * (d_p + memory).sign_()
-    
-    # パラメータの更新
     p.add_(corrected_gradient, alpha=-1)
-    
-    # モメンタムの指数移動平均の更新
     exp_avg.mul_(beta2).add_(grad, alpha=1 - beta2)
-    
-    # メモリの更新
     memory.add_(d_p).add_(corrected_gradient, alpha=-1)
 
 # EfLionクラス
