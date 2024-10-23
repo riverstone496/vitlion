@@ -871,9 +871,11 @@ if __name__ == '__main__':
     elif args.optimizer_name == 'lion_wo_sign':
         optimizer = LionWoSign(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
     elif args.optimizer_name == 'u4_sign_lion':
-            optimizer = U4SignLion(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
+        optimizer = U4SignLion(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
+        require_backward_grad_sync = False
     elif args.optimizer_name == 'mean_sign_lion':
-            optimizer = MeanQuantSignLion(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
+        optimizer = MeanQuantSignLion(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
+        require_backward_grad_sync = False
     elif args.optimizer_name == 'adamw':
         optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
     elif args.optimizer_name == 'sgd':
