@@ -2,7 +2,7 @@
 #$ -cwd
 #$ -l node_f=2
 # 実行時間を指定
-#$ -l h_rt=20:00:00
+#$ -l h_rt=24:00:00
 #$ -o outputs/$JOB_ID
 #$ -e errors/$JOB_ID
 #$ -p -5
@@ -52,11 +52,11 @@ mpirun -np $NUM_GPUS \
    python pretrain.py  --model resnet50  --lr 3e-4 --weight-decay 1 --beta2 0.99\
         --input-size 3 224 224 --project_name vision_lion\
         --sched cosine_iter --epochs 90 \
-        --batch-size 1024 --optimizer_name lion --num-classes 1000 \
+        --batch-size 1024 --optimizer_name u4_sign_lion --num-classes 1000 \
         --warmup-epochs 5 --cooldown-epochs 0 \
         --smoothing 0.1 --drop-path 0.1 --aa rand-m9-mstd0.5-inc1 \
         --repeated-aug --mixup 0.8 --cutmix 1.0 --reprob 0.25 \
         --remode pixel --interpolation bicubic --hflip 0.0 \
         -j 1 --eval-metric loss --no-prefetcher \
         --output ./output/pretrain \
-        --log-wandb --train_data_dir /gs/bs/tga-bayes-crest/ishikawa/dataset/ImageNet2012/train/  --eval_data_dir /gs/bs/tga-bayes-crest/ishikawa/dataset/ImageNet2012/val/
+        --log_wandb --train_data_dir /gs/bs/tga-bayes-crest/ishikawa/dataset/ImageNet2012/train/  --eval_data_dir /gs/bs/tga-bayes-crest/ishikawa/dataset/ImageNet2012/val/
