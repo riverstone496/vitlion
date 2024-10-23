@@ -1,28 +1,32 @@
 #!/bin/sh
 #$ -cwd
-#$ -l node_f=4
-#$ -l h_rt=12:00:00
+#$ -l node_f=2
+# 実行時間を指定
+#$ -l h_rt=20:00:00
 #$ -o outputs/$JOB_ID
 #$ -e errors/$JOB_ID
 #$ -p -5
+#$ -N vitsimagenetlion
 
-# Load modules
+# swich virtual env
+source ~/.bashrc
+module purge
+
+# Moduleコマンドの初期化
+. /etc/profile.d/modules.sh
 module load cuda/12.1.0
 module load nccl/2.20.5
 module load openmpi/5.0.2-gcc
 module load ninja/1.11.1
-module load cudnn/9.0.0
 
-# swich virtual env
-source ~/.bashrc
 
-# Distributed settings
+# distributed settings
 export MASTER_ADDR=$(/usr/sbin/ip a show dev bond0 | grep 'inet ' | awk '{ print $2 }' | cut -d "/" -f 1)
 export MASTER_PORT=$((10000 + ($JOB_ID % 50000)))
 
 echo "MASTER_ADDR=${MASTER_ADDR}"
 
-# Hostfile
+# hostfile
 export NUM_GPU_PER_NODE=4
 NODE_TYPE="h100"
 
@@ -30,16 +34,23 @@ NUM_NODES=$NHOSTS
 NUM_GPUS=$((${NUM_NODES} * ${NUM_GPU_PER_NODE}))
 
 mkdir -p ./hostfile
-export NCCL_DEBUG=WARN
 
+HOSTFILE_NAME=./hostfile/hostfile_${JOB_ID}
+while read -r hostname _ rest; do
+  echo "${hostname} slots=${NUM_GPU_PER_NODE}"
+done <"$PE_HOSTFILE" >"$HOSTFILE_NAME"
+
+export NCCL_IB_DISABLE=1
 mpirun -np $NUM_GPUS \
-     --npernode $NUM_GPU_PER_NODE \
-     -x MASTER_ADDR=$MASTER_ADDR \
-     -x MASTER_PORT=$MASTER_PORT \
-     -bind-to none \
-     -x PATH \
-     python pretrain.py  --model resnet50  --lr 3e-4 --weight-decay 1 --beta2 0.99 --momentum_sync_freq 0 \
-        --input-size 3 224 224 --project_name lion_imagenet\
+  --npernode $NUM_GPU_PER_NODE \
+  -hostfile $HOSTFILE_NAME \
+  -x MASTER_ADDR=$MASTER_ADDR \
+  -x MASTER_PORT=$MASTER_PORT \
+  -x CUDA_DEVICE_MAX_CONNECTIONS=1 \
+  -x LD_LIBRARY_PATH \
+  -x PATH \
+   python pretrain.py  --model resnet50  --lr 3e-4 --weight-decay 1 --beta2 0.99\
+        --input-size 3 224 224 --project_name vision_lion\
         --sched cosine_iter --epochs 90 \
         --batch-size 1024 --optimizer_name lion --num-classes 1000 \
         --warmup-epochs 5 --cooldown-epochs 0 \
