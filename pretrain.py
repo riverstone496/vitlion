@@ -45,7 +45,7 @@ from models.resnet import ResNet18, ResNet34, ResNet50, ResNet101, ResNet152
 from models.vgg import VGG
 from models.wideresnet import WideResNet
 from torchvision import transforms
-from optimizer import Lion, LionCom, LionComBF16, SignLion, GradLion, GradLionBf16, SignSGD, EFSignSGD, EfLion, ErrorFeedbackSGD, LionWoSign
+from optimizer import Lion, LionCom, LionComBF16, SignLion, GradLion, GradLionBf16, SignSGD, EFSignSGD, EfLion, ErrorFeedbackSGD, LionWoSign, U4SignLion, MeanQuantSignLion
 
 from utils.sync import sync_exp_avg, calculate_Tv
 
@@ -870,6 +870,10 @@ if __name__ == '__main__':
         optimizer = ErrorFeedbackSGD(model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
     elif args.optimizer_name == 'lion_wo_sign':
         optimizer = LionWoSign(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
+    elif args.optimizer_name == 'u4_sign_lion':
+            optimizer = U4SignLion(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
+    elif args.optimizer_name == 'mean_sign_lion':
+            optimizer = MeanQuantSignLion(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
     elif args.optimizer_name == 'adamw':
         optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
     elif args.optimizer_name == 'sgd':

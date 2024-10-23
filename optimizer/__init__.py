@@ -10,3 +10,5 @@ from .signsgd import SignSGD
 from .efsignsgd import EFSignSGD
 from .original_efsignsgd import ErrorFeedbackSGD
 from .lionwosign import LionWoSign
+from .mean_signlion import MeanQuantSignLion
+from .u4signlion import U4SignLion
