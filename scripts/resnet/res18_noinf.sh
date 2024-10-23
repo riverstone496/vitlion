@@ -2,7 +2,7 @@
 #$ -cwd
 #$ -l node_f=2
 # 実行時間を指定
-#$ -l h_rt=20:00:00
+#$ -l h_rt=24:00:00
 #$ -o outputs/$JOB_ID
 #$ -e errors/$JOB_ID
 #$ -p -5
@@ -49,15 +49,33 @@ mpirun -np $NUM_GPUS \
   -x CUDA_DEVICE_MAX_CONNECTIONS=1 \
   -x LD_LIBRARY_PATH \
   -x PATH \
-   python pretrain.py  --model vit_base_patch16_224  --lr 3e-4 --weight-decay 1 --beta2 0.99 \
-        --input-size 3 224 224 --project_name vision_lion\
-        --sched cosine_iter --epochs 90 \
-        --optimizer_name lion --batch-size 1024 --num-classes 1000 \
-        --warmup-epochs 5 --cooldown-epochs 0 \
-        --smoothing 0.1 --drop-path 0.1 --aa rand-m9-mstd0.5-inc1 \
-        --repeated-aug --mixup 0.8 --cutmix 1.0 --reprob 0.25 \
-        --remode pixel --interpolation bicubic --hflip 0.0 \
-        -j 1 --eval-metric loss --no-prefetcher \
-        --output ./output/pretrain \
-        --wo_infiniband --cluster tsubame \
-        --log_wandb --train_data_dir /gs/bs/tga-bayes-crest/ishikawa/dataset/ImageNet2012/train/  --eval_data_dir /gs/bs/tga-bayes-crest/ishikawa/dataset/ImageNet2012/val/
+   python pretrain.py \
+    --use_cifar \
+    --cluster 'tsubame' \
+    --wo_infiniband \
+    --dataset CIFAR100 \
+    --model resnet18 \
+    --workers 16 \
+    --batch-size 256 \
+    --sched cosine_iter \
+    --epochs 100 \
+    --lr 3e-4 \
+    --beta2 0.99 \
+    --weight-decay 5e-4 \
+    --optimizer_name 'com_lion_bf16' \
+    --num-classes 100 \
+    --warmup-epochs 0 \
+    --cooldown-epochs 0 \
+    --smoothing 0.1 \
+    --drop-path 0.1 \
+    --aa 'rand-m9-mstd0.5-inc1' \
+    --repeated-aug \
+    --mixup 0.8 \
+    --cutmix 1.0 \
+    --reprob 0.25 \
+    --remode 'pixel' \
+    --interpolation 'bicubic' \
+    --hflip 0.0 \
+    --eval-metric 'loss' \
+    --log_wandb \
+    --AugmentAll

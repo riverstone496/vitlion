@@ -59,4 +59,5 @@ mpirun -np $NUM_GPUS \
         --remode pixel --interpolation bicubic --hflip 0.0 \
         -j 1 --eval-metric loss --no-prefetcher \
         --output ./output/pretrain \
+        --wo_infiniband --cluster tsubame \
         --log_wandb --train_data_dir /gs/bs/tga-bayes-crest/ishikawa/dataset/ImageNet2012/train/  --eval_data_dir /gs/bs/tga-bayes-crest/ishikawa/dataset/ImageNet2012/val/
