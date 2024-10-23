@@ -450,7 +450,7 @@ def train_one_epoch(
     return OrderedDict([('loss', losses_m.avg), ('all_time', 1000*train_all_time), ('time', 1000*train_time / iter_per_epoch), 
                         ('forward_time', 1000*forward_time/ iter_per_epoch), ('backward_time', 1000*backward_time/ iter_per_epoch),
                         ('step_time', 1000*step_time/ iter_per_epoch), ('comm_time', 1000*comm_time/ iter_per_epoch),
-                        ('comm_ratio', 100 * comm_time / iter_per_epoch)])
+                        ('comm_ratio', 100 * comm_time / train_time)])
 
 def validate(model, loader, loss_fn, args, amp_autocast=suppress, log_suffix=''):
     batch_time_m = AverageMeter()
