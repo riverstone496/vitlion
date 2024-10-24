@@ -47,7 +47,7 @@ from models.wideresnet import WideResNet
 from torchvision import transforms
 from optimizer import Lion, LionCom, LionComBF16, SignLion, GradLion, GradLionBf16, SignSGD, EFSignSGD, EfLion, ErrorFeedbackSGD, LionWoSign, U4SignLion, MeanQuantSignLion
 
-from utils.sync import sync_exp_avg, calculate_Tv
+from utils.sync import sync_exp_avg, calculate_Tv, sync_exp_avg_variance
 from utils.dataset import load_cifar5m, CIFAR5mDataset
 
 
@@ -306,6 +306,7 @@ parser.add_argument('--CIFAR10Policy', action='store_true', default=False,
 parser.add_argument('--AugmentAll', action='store_true', default=False,
                     help='use cifar dataset')
 parser.add_argument('--log_wandb', action='store_true', help='Enable WandB logging')
+parser.add_argument('--log_variance', action='store_true', help='Enable WandB logging')
 
 def _parse_args():
     args = parser.parse_args()
@@ -317,7 +318,7 @@ def _parse_args():
 def train_one_epoch(
         epoch, model, loader, optimizer, loss_fn, args,
         lr_scheduler=None, saver=None, output_dir=None, amp_autocast=suppress,
-        loss_scaler=None, mixup_fn=None):
+        loss_scaler=None, mixup_fn=None, module_param_map=None):
     global train_all_time
     if args.mixup_off_epoch and epoch >= args.mixup_off_epoch:
         if args.prefetcher and loader.mixup_enabled:
@@ -384,6 +385,9 @@ def train_one_epoch(
             step_time += time.time() - start_time
 
         torch.cuda.synchronize()
+        variance_logs=None
+        if num_updates % 1000 == 0 and args.log_variance:
+            variance_logs = sync_exp_avg_variance(optimizer, module_param_map, not_replace=True)
         if args.sync_momentum>0 and num_updates % args.sync_momentum == 0 and num_updates <= args.max_iters_sync_momentum:
             sync_exp_avg(optimizer)
             total_sync_momentum += 1
@@ -426,6 +430,9 @@ def train_one_epoch(
 
                 if args.log_wandb:
                     log_dict = {'epoch' : epoch, 'iter': num_updates, 'lr': lr, 'loss':losses_m.val}
+                    if variance_logs is not None:
+                        log_dict.update(variance_logs)
+                        log_dict[f'var_iter{str(num_updates)}/'] = variance_logs
                     wandb.log(log_dict)
                 if math.isnan(losses_m.val):
                     break
@@ -892,6 +899,11 @@ if __name__ == '__main__':
     elif args.optimizer_name == 'sgd':
         optimizer = torch.optim.SGD(model.parameters(), lr=100*args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
 
+    module_param_map = {}
+    for module_name, module in model.named_modules():
+        for name, param in module.named_parameters(recurse=False):
+            module_param_map[param] = module_name
+
     # setup automatic mixed-precision (AMP) loss scaling and op casting
     amp_autocast = suppress  # do nothing
     loss_scaler = None
@@ -1001,7 +1013,8 @@ if __name__ == '__main__':
             train_metrics = train_one_epoch(
                 epoch, model, loader_train, optimizer, train_loss_fn, args,
                 lr_scheduler=lr_scheduler, saver=None, output_dir=output_dir,
-                amp_autocast=amp_autocast, loss_scaler=loss_scaler, mixup_fn=mixup_fn)
+                amp_autocast=amp_autocast, loss_scaler=loss_scaler, mixup_fn=mixup_fn,
+                module_param_map = module_param_map)
             
             ## EVAL
             num_updates = (epoch+1) * len(loader_train)
