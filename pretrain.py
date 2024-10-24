@@ -402,7 +402,7 @@ def train_one_epoch(
         if hasattr(optimizer, 'elapsed_time'):
             comm_time += optimizer.elapsed_time
 
-        if last_batch or num_updates % args.log_interval == 0:
+        if last_batch or num_updates % args.log_interval == 1:
             lrl = [param_group['lr'] for param_group in optimizer.param_groups]
             lr = sum(lrl) / len(lrl)
 
@@ -411,6 +411,7 @@ def train_one_epoch(
                 losses_m.update(reduced_loss.item(), input.size(0))
 
             if args.rank == 0:
+                torch.cuda.synchronize()
                 _logger.info(
                     'Train: {} [{:>4d}/{} ({:>3.0f}%)]  '
                     'Loss: {loss.val:>9.6f} ({loss.avg:>6.4f})  '
