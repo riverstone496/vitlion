@@ -48,6 +48,8 @@ from torchvision import transforms
 from optimizer import Lion, LionCom, LionComBF16, SignLion, GradLion, GradLionBf16, SignSGD, EFSignSGD, EfLion, ErrorFeedbackSGD, LionWoSign, U4SignLion, MeanQuantSignLion
 
 from utils.sync import sync_exp_avg, calculate_Tv
+from utils.dataset import load_cifar5m, CIFAR5mDataset
+
 
 def print0(message):
     if dist.is_initialized():
@@ -291,6 +293,8 @@ parser.add_argument('--wo_infiniband', action='store_true', help='Compile the mo
 parser.add_argument('--cluster', type=str, default=None, help='Distributed backend')
 
 # CIFAR Dataset
+parser.add_argument('--cifar_5m_dir', type=str, default='./data', help='Number of warmup iterations')
+
 parser.add_argument('--use_cifar', action='store_true', default=False,
                     help='use cifar dataset')
 parser.add_argument('--RandomCrop', action='store_true', default=False,
@@ -751,7 +755,14 @@ if __name__ == '__main__':
                                         train=False,
                                         download=True,
                                         transform = val_transform)
-        
+        elif datasetname == 'cifar5m':
+            cutout = Cutout(n_holes=1, length=16)
+            train_transform.transforms.append(cutout)
+            Xt, Yt = load_cifar5m(local_dir=args.cifar_5m_dir, train=True)
+            Xv, Yv = load_cifar5m(local_dir=args.cifar_5m_dir, train=False)
+            dataset_train = CIFAR5mDataset(Xt, Yt, transform=train_transform)
+            dataset_eval = CIFAR5mDataset(Xv, Yv, transform=train_transform)
+
         loader_train = torch.utils.data.DataLoader(dataset=dataset_train,
                                                     batch_size=args.batch_size,
                                                     shuffle=True,
