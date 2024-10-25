@@ -54,12 +54,13 @@ mpirun -np $NUM_GPUS \
     --cluster 'tsubame' \
     --project_name 'vision_lion' \
     --wo_infiniband \
-    --dataset CIFAR100 \
+    --dataset cifar5m \
+    --cifar_5m_dir ../../dataset/cifar5m/ \
     --model resnet18 \
     --workers 16 \
     --batch-size 64 \
     --sched cosine_iter \
-    --epochs 100 \
+    --epochs 1 \
     --lr 3e-4 \
     --beta2 0.99 \
     --weight-decay 5e-4 \
