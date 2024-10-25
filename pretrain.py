@@ -316,7 +316,7 @@ def _parse_args():
     return args, args_text
 
 def train_one_epoch(
-        epoch, model, loader, optimizer, loss_fn, args,
+        epoch, model, loader, loader_eval, optimizer, loss_fn, args,
         lr_scheduler=None, saver=None, output_dir=None, amp_autocast=suppress,
         loss_scaler=None, mixup_fn=None, module_param_map=None):
     global train_all_time
@@ -385,10 +385,10 @@ def train_one_epoch(
             step_time += time.time() - start_time
 
         torch.cuda.synchronize()
-        variance_logs=None
+        variance_logs = None
         if num_updates % 1000 == 0 and args.log_variance:
             variance_logs = sync_exp_avg_variance(optimizer, module_param_map, not_replace=True)
-        if args.sync_momentum>0 and num_updates % args.sync_momentum == 0 and num_updates <= args.max_iters_sync_momentum:
+        if args.sync_momentum > 0 and num_updates % args.sync_momentum == 0 and num_updates <= args.max_iters_sync_momentum:
             sync_exp_avg(optimizer)
             total_sync_momentum += 1
         if num_updates in momentum_iters:
@@ -430,7 +430,7 @@ def train_one_epoch(
                         data_time=data_time_m))
 
                 if args.log_wandb:
-                    log_dict = {'epoch' : epoch, 'iter': num_updates, 'lr': lr, 'loss':losses_m.val}
+                    log_dict = {'epoch': epoch, 'iter': num_updates, 'lr': lr, 'loss': losses_m.val}
                     if variance_logs is not None:
                         log_dict.update(variance_logs)
                         log_dict[f'var_iter{str(num_updates)}/'] = variance_logs
@@ -445,6 +445,15 @@ def train_one_epoch(
                         padding=0,
                         normalize=True)
 
+        # Add validation every log_interval for cifar5m
+        if args.log_wandb and args.dataset.lower() == 'cifar5m' and batch_idx % 1000 == 0:
+            eval_metrics = validate(model, loader_eval, loss_fn, args, amp_autocast)
+            if args.rank == 0:
+                _logger.info(f'Validation metrics after batch {batch_idx}: {eval_metrics}')
+            eval_metrics['epoch'] = epoch
+            eval_metrics['iter'] = num_updates
+            wandb.log(eval_metrics)
+
         if saver is not None and args.recovery_interval and (
                 last_batch or (batch_idx + 1) % args.recovery_interval == 0):
             saver.save_recovery(epoch, batch_idx=batch_idx)
@@ -454,14 +463,16 @@ def train_one_epoch(
 
         end = time.time()
         train_all_time += train_time
-        # end for
 
     if hasattr(optimizer, 'sync_lookahead'):
         optimizer.sync_lookahead()
 
-    return OrderedDict([('loss', losses_m.avg), ('all_time', 1000*train_all_time), ('time', 1000*train_time / iter_per_epoch), 
-                        ('forward_time', 1000*forward_time/ iter_per_epoch), ('backward_time', 1000*backward_time/ iter_per_epoch),
-                        ('step_time', 1000*step_time/ iter_per_epoch), ('comm_time', 1000*comm_time/ iter_per_epoch),
+    return OrderedDict([('loss', losses_m.avg), ('all_time', 1000 * train_all_time),
+                        ('time', 1000 * train_time / iter_per_epoch),
+                        ('forward_time', 1000 * forward_time / iter_per_epoch),
+                        ('backward_time', 1000 * backward_time / iter_per_epoch),
+                        ('step_time', 1000 * step_time / iter_per_epoch),
+                        ('comm_time', 1000 * comm_time / iter_per_epoch),
                         ('comm_ratio', 100 * comm_time / train_time)])
 
 def validate(model, loader, loss_fn, args, amp_autocast=suppress, log_suffix=''):
