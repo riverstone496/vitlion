@@ -453,7 +453,8 @@ def train_one_epoch(
                 _logger.info(f'Validation metrics after batch {batch_idx}: {eval_metrics}')
             eval_metrics['epoch'] = epoch
             eval_metrics['iter'] = num_updates
-            wandb.log(eval_metrics)
+            if args.rank == 0:
+                wandb.log(eval_metrics)
 
         if saver is not None and args.recovery_interval and (
                 last_batch or (batch_idx + 1) % args.recovery_interval == 0):
