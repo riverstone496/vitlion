@@ -293,7 +293,7 @@ parser.add_argument('--wo_infiniband', action='store_true', help='Compile the mo
 parser.add_argument('--cluster', type=str, default=None, help='Distributed backend')
 
 # CIFAR Dataset
-parser.add_argument('--cifar_5m_dir', type=str, default='./data', help='Number of warmup iterations')
+parser.add_argument('--cifar_5m_dir', type=str, default='../data/cifar5m/', help='Number of warmup iterations')
 
 parser.add_argument('--use_cifar', action='store_true', default=False,
                     help='use cifar dataset')
@@ -588,7 +588,7 @@ if __name__ == '__main__':
                             "Metrics not being logged to wandb, try `pip install wandb`")
 
     if args.use_cifar:
-        if args.dataset.lower() == 'cifar10':
+        if args.dataset.lower() == 'cifar10' or args.dataset.lower() == 'cifar5m':
             args.num_classes = 10
         if args.dataset.lower()== 'cifar100':
             args.num_classes = 100
