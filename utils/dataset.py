@@ -75,7 +75,6 @@ class CIFAR5mDataset(Dataset):
 
         return img, target
 
-# 各GPUに特定のクラスのサブセットを割り当てる
-def get_class_subset(dataset, rank):
-    indices = [i for i, (_, target) in enumerate(dataset) if target % rank == 0]
+def get_class_subset(dataset, num_replicas, rank):
+    indices = [i for i, (_, target) in enumerate(dataset) if target % num_replicas == rank]
     return Subset(dataset, indices)

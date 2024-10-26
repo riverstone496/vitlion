@@ -787,7 +787,7 @@ if __name__ == '__main__':
             dataset_eval = CIFAR5mDataset(Xv, Yv, transform=train_transform)
 
         if args.class_worker:
-            dataset_train = get_class_subset(dataset_train, args.rank)
+            dataset_train = get_class_subset(dataset_train, dist.get_world_size(), rank)
 
         if args.use_sampler:
             train_sampler = torch.utils.data.distributed.DistributedSampler(
