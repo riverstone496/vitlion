@@ -306,6 +306,7 @@ parser.add_argument('--CIFAR10Policy', action='store_true', default=False,
                     help='use cifar dataset')
 parser.add_argument('--AugmentAll', action='store_true', default=False,
                     help='use cifar dataset')
+parser.add_argument('--use_sampler', action='store_true', help='Enable WandB logging')
 parser.add_argument('--log_wandb', action='store_true', help='Enable WandB logging')
 parser.add_argument('--log_variance', action='store_true', help='Enable WandB logging')
 
@@ -447,7 +448,7 @@ def train_one_epoch(
                         normalize=True)
 
         # Add validation every log_interval for cifar5m
-        if args.log_wandb and args.dataset.lower() == 'cifar5m' and batch_idx % 1000 == 0:
+        if args.log_wandb and args.dataset.lower() == 'cifar5m' and batch_idx % 500 == 0:
             eval_metrics = validate(model, loader_eval, loss_fn, args, amp_autocast)
             if args.rank == 0:
                 _logger.info(f'Validation metrics after batch {batch_idx}: {eval_metrics}')
@@ -784,11 +785,19 @@ if __name__ == '__main__':
             dataset_train = CIFAR5mDataset(Xt, Yt, transform=train_transform)
             dataset_eval = CIFAR5mDataset(Xv, Yv, transform=train_transform)
 
+        if args.use_sampler:
+            train_sampler = torch.utils.data.distributed.DistributedSampler(
+            dataset_train,
+            num_replicas=dist.get_world_size(),
+            rank=dist.get_rank())
+        else:
+            train_sampler = None
         loader_train = torch.utils.data.DataLoader(dataset=dataset_train,
                                                     batch_size=args.batch_size,
                                                     shuffle=True,
                                                     pin_memory=True,
-                                                    num_workers=args.workers)
+                                                    num_workers=args.workers,
+                                                    sampler = train_sampler)
         loader_eval = torch.utils.data.DataLoader(dataset=dataset_eval,
                                                     batch_size=args.batch_size,
                                                     shuffle=False,
