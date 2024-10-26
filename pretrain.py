@@ -794,9 +794,6 @@ if __name__ == '__main__':
             train_sampler = None
         loader_train = torch.utils.data.DataLoader(dataset=dataset_train,
                                                     batch_size=args.batch_size,
-                                                    shuffle=True,
-                                                    pin_memory=True,
-                                                    num_workers=args.workers,
                                                     sampler = train_sampler)
         loader_eval = torch.utils.data.DataLoader(dataset=dataset_eval,
                                                     batch_size=args.batch_size,
