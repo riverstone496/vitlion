@@ -4,6 +4,7 @@ from torch.utils.data import Dataset, DataLoader
 import numpy as np
 import os, requests
 from PIL import Image
+from torch.utils.data import Subset
 
 def download_file(url, local_path):
     if not os.path.exists(local_path):  # ファイルが存在しない場合のみダウンロード
@@ -73,3 +74,8 @@ class CIFAR5mDataset(Dataset):
             img = self.transform(img)
 
         return img, target
+
+# 各GPUに特定のクラスのサブセットを割り当てる
+def get_class_subset(dataset, rank):
+    indices = [i for i, (_, target) in enumerate(dataset) if target % rank == 0]
+    return Subset(dataset, indices)

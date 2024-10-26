@@ -48,7 +48,7 @@ from torchvision import transforms
 from optimizer import Lion, LionCom, LionComBF16, SignLion, GradLion, GradLionBf16, SignSGD, EFSignSGD, EfLion, ErrorFeedbackSGD, LionWoSign, U4SignLion, MeanQuantSignLion
 
 from utils.sync import sync_exp_avg, calculate_Tv, sync_exp_avg_variance
-from utils.dataset import load_cifar5m, CIFAR5mDataset
+from utils.dataset import load_cifar5m, CIFAR5mDataset, get_class_subset
 
 
 def print0(message):
@@ -309,6 +309,7 @@ parser.add_argument('--AugmentAll', action='store_true', default=False,
 parser.add_argument('--use_sampler', action='store_true', help='Enable WandB logging')
 parser.add_argument('--log_wandb', action='store_true', help='Enable WandB logging')
 parser.add_argument('--log_variance', action='store_true', help='Enable WandB logging')
+parser.add_argument('--class_worker', action='store_true', help='Enable WandB logging')
 
 def _parse_args():
     args = parser.parse_args()
@@ -784,6 +785,9 @@ if __name__ == '__main__':
             Xv, Yv = load_cifar5m(local_dir=args.cifar_5m_dir, train=False)
             dataset_train = CIFAR5mDataset(Xt, Yt, transform=train_transform)
             dataset_eval = CIFAR5mDataset(Xv, Yv, transform=train_transform)
+
+        if args.class_worker:
+            dataset_train = get_class_subset(dataset_train, args.rank)
 
         if args.use_sampler:
             train_sampler = torch.utils.data.distributed.DistributedSampler(
