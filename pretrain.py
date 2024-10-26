@@ -786,9 +786,6 @@ if __name__ == '__main__':
             dataset_train = CIFAR5mDataset(Xt, Yt, transform=train_transform)
             dataset_eval = CIFAR5mDataset(Xv, Yv, transform=train_transform)
 
-        if args.class_worker:
-            dataset_train = get_class_subset(dataset_train, dist.get_world_size(), rank)
-
         if args.use_sampler:
             train_sampler = torch.utils.data.distributed.DistributedSampler(
             dataset_train,
@@ -967,6 +964,11 @@ if __name__ == '__main__':
             if args.rank == 0:
                 _logger.info("Using native Torch DistributedDataParallel.")
             model = NativeDDP(model, device_ids=[args.local_rank])  # can use device str in Torch >= 1.1
+
+    if args.class_worker:
+        dataset_train = get_class_subset(dataset_train, dist.get_world_size(), rank)
+        loader_train = torch.utils.data.DataLoader(dataset=dataset_train,
+                                                    batch_size=args.batch_size)
 
     # setup learning rate schedule and starting epoch
     iter_per_epoch = len(loader_train)
