@@ -114,6 +114,7 @@ class ClassDistributedSampler(Sampler):
         self.seed = seed
         self.class_indices = self._group_by_class()
         self.indices = self._select_indices_for_rank()
+        self.indices = self._repeat_indices_to_match_length()
 
     def _group_by_class(self):
         # クラスごとのインデックスを作成
@@ -129,6 +130,22 @@ class ClassDistributedSampler(Sampler):
             if cls_label % self.num_replicas == self.rank:
                 indices.extend(cls_indices)
         return indices
+
+    def _repeat_indices_to_match_length(self):
+        # 各ワーカーのサンプル数を集めて最大長に合わせる
+        gathered_lengths = [None] * self.num_replicas
+        local_length = len(self.indices)
+        
+        # 他のworkerのインデックス長を収集
+        torch.distributed.all_gather_object(gathered_lengths, local_length)
+        max_length = max(gathered_lengths)
+
+        # サンプルが足りない場合に繰り返して補充
+        if len(self.indices) < max_length:
+            repeats = max_length - len(self.indices)
+            self.indices.extend(random.choices(self.indices, k=repeats))
+        
+        return self.indices
 
     def __iter__(self):
         if self.shuffle:
