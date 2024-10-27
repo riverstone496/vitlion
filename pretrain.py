@@ -45,7 +45,7 @@ from models.resnet import ResNet18, ResNet34, ResNet50, ResNet101, ResNet152
 from models.vgg import VGG
 from models.wideresnet import WideResNet
 from torchvision import transforms
-from optimizer import Lion, LionCom, LionComBF16, SignLion, GradLion, GradLionBf16, SignSGD, EFSignSGD, EfLion, ErrorFeedbackSGD, LionWoSign, U4SignLion, MeanQuantSignLion
+from optimizer import Lion, LionCom, LionComBF16, SignLion, GradLion, GradLionBf16, SignSGD, EFSignSGD, EfLion, ErrorFeedbackSGD, LionWoSign, U4SignLion, MeanQuantSignLion, CMPSSignSignLion, CMPMeanQuantSignLion
 
 from utils.sync import sync_exp_avg, calculate_Tv, sync_exp_avg_variance, ClassDistributedSampler
 from utils.dataset import load_cifar5m, CIFAR5mDataset, get_class_subset
@@ -439,6 +439,18 @@ def train_one_epoch(
                         log_dict.update(variance_logs)
                         if num_updates % 3000 == 1:
                             log_dict[f'var_iter{str(num_updates)}/'] = variance_logs
+                    if 'cmp_' in args.optimizer_name:
+                        log_dict["sign_matches/all"] = 100 * optimizer.matches / optimizer.numel
+                        log_dict["sign_unmatches/all"] = 100 * optimizer.un_matches / optimizer.numel
+                        idx =0
+                        for group in optimizer.param_groups:
+                            for p in group['params']:
+                                if p.grad is not None:
+                                    module_name = module_param_map.get(p, "Unknown")
+                                    log_dict[f"sign_matches/{module_name}"] = optimizer.update_matches[idx]
+                                    log_dict[f"sign_unmatches/{module_name}"] = optimizer.update_unmatches[idx]
+                                    idx += 1
+                        log_dict.update(optimizer.update_matches_cor)
                     wandb.log(log_dict)
                 if math.isnan(losses_m.val):
                     break
@@ -926,6 +938,12 @@ if __name__ == '__main__':
         require_backward_grad_sync = False
     elif args.optimizer_name == 'mean_sign_lion':
         optimizer = MeanQuantSignLion(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
+        require_backward_grad_sync = False
+    elif args.optimizer_name == 'cmp_mean_sign_lion':
+        optimizer = CMPMeanQuantSignLion(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
+        require_backward_grad_sync = False
+    elif args.optimizer_name == 'cmp_squant_sign_lion':
+        optimizer = CMPSSignSignLion(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
         require_backward_grad_sync = False
     elif args.optimizer_name == 'adamw':
         optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
