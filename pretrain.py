@@ -310,6 +310,7 @@ parser.add_argument('--use_sampler', action='store_true', help='Enable WandB log
 parser.add_argument('--log_wandb', action='store_true', help='Enable WandB logging')
 parser.add_argument('--log_variance', action='store_true', help='Enable WandB logging')
 parser.add_argument('--class_worker', action='store_true', help='Enable WandB logging')
+parser.add_argument('--log_sync_momentum_interval', default=None, type=int)
 
 def _parse_args():
     args = parser.parse_args()
@@ -389,7 +390,7 @@ def train_one_epoch(
 
         torch.cuda.synchronize()
         variance_logs = None
-        if num_updates % 1000 == 0 and args.log_variance:
+        if num_updates % args.log_sync_momentum_interval == 0 and args.log_variance:
             variance_logs = sync_exp_avg_variance(optimizer, module_param_map, not_replace=True)
         if args.sync_momentum > 0 and num_updates % args.sync_momentum == 0 and num_updates <= args.max_iters_sync_momentum:
             sync_exp_avg(optimizer)
@@ -436,7 +437,8 @@ def train_one_epoch(
                     log_dict = {'epoch': epoch, 'iter': num_updates, 'lr': lr, 'loss': losses_m.val}
                     if variance_logs is not None:
                         log_dict.update(variance_logs)
-                        log_dict[f'var_iter{str(num_updates)}/'] = variance_logs
+                        if num_updates % 3000 == 1:
+                            log_dict[f'var_iter{str(num_updates)}/'] = variance_logs
                     wandb.log(log_dict)
                 if math.isnan(losses_m.val):
                     break
@@ -546,6 +548,9 @@ if __name__ == '__main__':
     setup_default_logging()
     args, args_text = _parse_args()
     train_all_time = 0
+
+    if args.log_sync_momentum_interval is None:
+        args.log_sync_momentum_interval = args.log_interval
 
     args.prefetcher = not args.no_prefetcher
     args.distributed = int(os.getenv('OMPI_COMM_WORLD_SIZE', '1')) > 1
