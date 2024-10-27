@@ -47,7 +47,7 @@ from models.wideresnet import WideResNet
 from torchvision import transforms
 from optimizer import Lion, LionCom, LionComBF16, SignLion, GradLion, GradLionBf16, SignSGD, EFSignSGD, EfLion, ErrorFeedbackSGD, LionWoSign, U4SignLion, MeanQuantSignLion
 
-from utils.sync import sync_exp_avg, calculate_Tv, sync_exp_avg_variance
+from utils.sync import sync_exp_avg, calculate_Tv, sync_exp_avg_variance, ClassDistributedSampler
 from utils.dataset import load_cifar5m, CIFAR5mDataset, get_class_subset
 
 
@@ -787,7 +787,14 @@ if __name__ == '__main__':
             dataset_eval = CIFAR5mDataset(Xv, Yv, transform=train_transform)
 
         if args.use_sampler:
-            train_sampler = torch.utils.data.distributed.DistributedSampler(
+            if args.class_worker:
+                train_sampler =ClassDistributedSampler(
+                    dataset_train,
+                    num_replicas=dist.get_world_size(),
+                    rank=dist.get_rank()
+                )
+            else:
+                train_sampler = torch.utils.data.distributed.DistributedSampler(
             dataset_train,
             num_replicas=dist.get_world_size(),
             rank=dist.get_rank())
@@ -964,11 +971,6 @@ if __name__ == '__main__':
             if args.rank == 0:
                 _logger.info("Using native Torch DistributedDataParallel.")
             model = NativeDDP(model, device_ids=[args.local_rank])  # can use device str in Torch >= 1.1
-
-    if args.class_worker:
-        dataset_train = get_class_subset(dataset_train, dist.get_world_size(), rank)
-        loader_train = torch.utils.data.DataLoader(dataset=dataset_train,
-                                                    batch_size=args.batch_size)
 
     # setup learning rate schedule and starting epoch
     iter_per_epoch = len(loader_train)

@@ -1,6 +1,8 @@
 import torch
 from torch.distributed import all_reduce, ReduceOp
-
+from torch.utils.data import Dataset, DataLoader, Sampler
+from collections import defaultdict
+import random
 
 def sync_exp_avg(optimizer):
     """
@@ -102,3 +104,37 @@ def calculate_Tv(iter, k=16):
         Tv.append(int(next_step))
         j += 1
     return Tv
+
+class ClassDistributedSampler(Sampler):
+    def __init__(self, dataset, num_replicas=None, rank=None, shuffle=True, seed=0):
+        self.dataset = dataset
+        self.num_replicas = num_replicas if num_replicas is not None else torch.distributed.get_world_size()
+        self.rank = rank if rank is not None else torch.distributed.get_rank()
+        self.shuffle = shuffle
+        self.seed = seed
+        self.class_indices = self._group_by_class()
+        self.indices = self._select_indices_for_rank()
+
+    def _group_by_class(self):
+        # クラスごとのインデックスを作成
+        class_indices = defaultdict(list)
+        for idx, (_, target) in enumerate(self.dataset):
+            class_indices[target].append(idx)
+        return class_indices
+
+    def _select_indices_for_rank(self):
+        # クラスラベル % num_replicas == rank に基づきインデックスを選択
+        indices = []
+        for cls_label, cls_indices in self.class_indices.items():
+            if cls_label % self.num_replicas == self.rank:
+                indices.extend(cls_indices)
+        return indices
+
+    def __iter__(self):
+        if self.shuffle:
+            random.seed(self.seed + self.rank)
+            random.shuffle(self.indices)
+        return iter(self.indices)
+
+    def __len__(self):
+        return len(self.indices)
