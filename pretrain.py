@@ -437,7 +437,7 @@ def train_one_epoch(
                     log_dict = {'epoch': epoch, 'iter': num_updates, 'lr': lr, 'loss': losses_m.val}
                     if variance_logs is not None:
                         log_dict.update(variance_logs)
-                        if num_updates % 3000 == 1:
+                        if num_updates % 10000 == 1:
                             log_dict[f'var_iter{str(num_updates)}/'] = variance_logs
                     if 'cmp_' in args.optimizer_name:
                         log_dict["sign_matches/all"] = 100 * optimizer.matches / optimizer.numel
