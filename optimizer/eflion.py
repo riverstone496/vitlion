@@ -9,8 +9,7 @@ def exists(val):
 # 更新関数
 def update_fn(p, grad, exp_avg, memory, lr, wd, beta1, beta2):
     # Weight Decayを勾配に直接適用
-    if wd != 0:
-        grad = grad + wd * p.data
+    p.data.mul_(1 - lr * wd)
     # make update vector
     d_p = lr * exp_avg.clone().mul_(beta1).add(grad, alpha=1 - beta1)
     corrected_gradient = lr * (d_p + memory).sign_()
