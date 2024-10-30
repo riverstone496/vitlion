@@ -580,7 +580,6 @@ if __name__ == '__main__':
         ngpus_per_node = torch.cuda.device_count()
         node = rank // ngpus_per_node
         args.local_rank = rank % ngpus_per_node
-        torch.cuda.set_device(args.local_rank)
         if args.optimizer_name == 'distributed_lion':
             import deepspeed
             from deepspeed.accelerator import get_accelerator
@@ -588,6 +587,7 @@ if __name__ == '__main__':
             get_accelerator().set_device(args.local_rank)
             device = torch.device(get_accelerator().device_name(), args.local_rank)
         else:
+            torch.cuda.set_device(args.local_rank)
             torch.distributed.init_process_group(backend=args.dist_backend, init_method=method, world_size=world_size, rank=rank)
         args.rank = rank
         args.world_size = world_size

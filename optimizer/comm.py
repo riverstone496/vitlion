@@ -72,6 +72,13 @@ class NcclBackend(object):
 
         worker_scale = torch.tensor(1.00, device = buffer_m.device)
 
+        padding_size = ((self.size*8) - (original_size % (self.size*8))) % (self.size*8)
+        # パディングが必要な場合、1で埋める
+        if padding_size > 0:
+            buffer_m = torch.cat([buffer_m, torch.ones(padding_size, device=buffer_m.device, dtype=buffer_m.dtype)])
+        else:
+            buffer_m = buffer_m
+            
         if self.bool_not_supported:
             cupy_sign_list_packed = self.compression_backend.compress_by_chunk(
                 self.compression_backend.torch2cupy(
@@ -202,7 +209,7 @@ class NcclBackend(object):
                             cupy_recvbuf_scale_server)).flatten().data)
         if len(original_shape) > 1:
             buffer_m = buffer_m.reshape(original_shape)
-
+        buffer_m = buffer_m[:original_size]
         return buffer_m
     
     def compressed_allreduce_nonflip(self,
@@ -355,7 +362,6 @@ class NcclBackend(object):
 
         worker_scale = torch.norm(buffer_m) / np.sqrt(buffer_m.numel())
         #worker_scale = torch.tensor([1])
-        print("worker_scale",worker_scale)
 
         if self.bool_not_supported:
             cupy_sign_list_packed = self.compression_backend.compress_by_chunk(
