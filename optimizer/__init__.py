@@ -15,3 +15,4 @@ from .u4signlion import U4SignLion
 from .cmp_squant_signlion import CMPSSignSignLion
 from .cmp_mean_signlion import CMPMeanQuantSignLion
 from .cmp_signlion import CMPSignLion
+from .distributed_lion import DistributedLion

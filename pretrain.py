@@ -45,7 +45,7 @@ from models.resnet import ResNet18, ResNet34, ResNet50, ResNet101, ResNet152
 from models.vgg import VGG
 from models.wideresnet import WideResNet
 from torchvision import transforms
-from optimizer import Lion, LionCom, LionComBF16, SignLion, GradLion, GradLionBf16, SignSGD, EFSignSGD, EfLion, ErrorFeedbackSGD, LionWoSign, U4SignLion, MeanQuantSignLion, CMPSSignSignLion, CMPMeanQuantSignLion, CMPSignLion
+from optimizer import Lion, LionCom, LionComBF16, SignLion, GradLion, GradLionBf16, SignSGD, EFSignSGD, EfLion, ErrorFeedbackSGD, LionWoSign, U4SignLion, MeanQuantSignLion, CMPSSignSignLion, CMPMeanQuantSignLion, CMPSignLion, DistributedLion
 
 from utils.sync import sync_exp_avg, calculate_Tv, sync_exp_avg_variance, ClassDistributedSampler
 from utils.dataset import load_cifar5m, CIFAR5mDataset, get_class_subset
@@ -947,6 +947,9 @@ if __name__ == '__main__':
         require_backward_grad_sync = False
     elif args.optimizer_name == 'cmp_sign_lion':
         optimizer = CMPSignLion(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
+        require_backward_grad_sync = False
+    elif args.optimizer_name == 'distributed_lion':
+        optimizer = DistributedLion(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
         require_backward_grad_sync = False
     elif args.optimizer_name == 'adamw':
         optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
