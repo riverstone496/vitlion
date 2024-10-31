@@ -314,7 +314,7 @@ parser.add_argument('--log_sync_momentum_interval', default=None, type=int)
 
 def _parse_args():
     args = parser.parse_args()
-
+    print(args)
     # Cache the args as a text string to save them in the output dir later
     args_text = yaml.safe_dump(args.__dict__, default_flow_style=False)
     return args, args_text
@@ -626,6 +626,7 @@ if __name__ == '__main__':
             _logger.warning("You've requested to log metrics to wandb but package not found. "
                             "Metrics not being logged to wandb, try `pip install wandb`")
 
+    timm_finetuning = False
     if args.use_cifar:
         if args.dataset.lower() == 'cifar10' or args.dataset.lower() == 'cifar5m':
             args.num_classes = 10
@@ -649,7 +650,11 @@ if __name__ == '__main__':
         elif 'VGG' in args.model:
             model = VGG(vgg_name=args.model, num_classes=args.num_classes)
         else:
-            print('No model matched')
+            timm_finetuning = True
+            model = create_model(
+                        args.model,
+                        pretrained=True,
+                        num_classes=args.num_classes)
     else:
         model = create_model(
         args.model,
@@ -765,16 +770,32 @@ if __name__ == '__main__':
                                             std=[x / 255.0 for x in [63.0, 62.1, 66.7]])
         train_transform = transforms.Compose([])
         if args.RandomCrop or args.AugmentAll:
-            train_transform.transforms.append(transforms.RandomCrop(32, padding=4))
+            if timm_finetuning:
+                train_transform.transforms.append(transforms.RandomResizedCrop(224))
+            else:
+                train_transform.transforms.append(transforms.RandomCrop(32, padding=4))
         else:
-            train_transform.transforms.append(transforms.Resize((32, 32)))
+            if timm_finetuning:
+                train_transform.transforms.append(transforms.Resize(256))
+                train_transform.transforms.append(transforms.CenterCrop(224))
+            else:
+                train_transform.transforms.append(transforms.Resize((32, 32)))
         if args.RandomHorizontalFlip or args.AugmentAll:
             train_transform.transforms.append(transforms.RandomHorizontalFlip())
         if args.CIFAR10Policy or args.AugmentAll:
             train_transform.transforms.append(CIFAR10Policy())
         train_transform.transforms.append(transforms.ToTensor())
         train_transform.transforms.append(normalize)
-        val_transform = transforms.Compose([
+        if timm_finetuning:
+            print(timm_finetuning)
+            val_transform = transforms.Compose([
+                transforms.Resize(256),
+                transforms.CenterCrop(224),
+                transforms.ToTensor(),
+                normalize
+        ])
+        else:
+            val_transform = transforms.Compose([
                 transforms.Resize((32, 32)),
                 transforms.ToTensor(),
                 normalize
