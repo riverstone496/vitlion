@@ -976,7 +976,7 @@ if __name__ == '__main__':
     elif args.optimizer_name == 'cmp_sign_lion':
         optimizer = CMPSignLion(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
         require_backward_grad_sync = False
-    elif args.optimizer_name == 'distributed_lion':
+    elif args.optimizer_name == 'distributed_lion' or args.optimizer_name == 'lioncub_1bit':
         optimizer = DistributedLion(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
         require_backward_grad_sync = False
     elif args.optimizer_name == 'adamw':
