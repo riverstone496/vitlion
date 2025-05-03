@@ -961,7 +961,7 @@ if __name__ == '__main__':
         optimizer = ErrorFeedbackSGD(model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
     elif args.optimizer_name == 'lion_wo_sign':
         optimizer = LionWoSign(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
-    elif args.optimizer_name == 'u4_sign_lion':
+    elif args.optimizer_name == 'u4_sign_lion' or args.optimizer_name == 'lioncub_4bit':
         optimizer = U4SignLion(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
         require_backward_grad_sync = False
     elif args.optimizer_name == 'mean_sign_lion':
