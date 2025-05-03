@@ -294,7 +294,7 @@ parser.add_argument('--wo_infiniband', action='store_true', help='Compile the mo
 parser.add_argument('--cluster', type=str, default=None, help='Distributed backend')
 
 # CIFAR Dataset
-parser.add_argument('--cifar_5m_dir', type=str, default='../data/cifar5m/', help='Number of warmup iterations')
+parser.add_argument('--cifar_5m_dir', type=str, default='../../data/cifar5m/', help='Number of warmup iterations')
 
 parser.add_argument('--use_cifar', action='store_true', default=False,
                     help='use cifar dataset')
