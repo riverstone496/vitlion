@@ -620,7 +620,7 @@ if __name__ == '__main__':
         ngpus_per_node = torch.cuda.device_count()
         node = rank // ngpus_per_node
         args.local_rank = rank % ngpus_per_node
-        if args.optimizer_name == 'distributed_lion':
+        if args.optimizer_name == 'distributed_lion' or args.optimizer_name == 'lioncub_1bit':
             import deepspeed
             from deepspeed.accelerator import get_accelerator
             deepspeed.init_distributed(dist_backend=get_accelerator().communication_backend_name())
