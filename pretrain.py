@@ -606,8 +606,9 @@ if __name__ == '__main__':
     args.rank = 0  # global rank
     if args.distributed:
         # initialize torch.distributed using MPI
+        port_random = str(random.randint(5000,10000))
         master_addr = os.getenv("MASTER_ADDR", default="localhost")
-        master_port = os.getenv('MASTER_PORT', default='8888')
+        master_port = os.getenv('MASTER_PORT', default=port_random)
         method = "tcp://{}:{}".format(master_addr, master_port)
         rank = int(os.getenv('OMPI_COMM_WORLD_RANK', '0'))  # global rank
         world_size = int(os.getenv('OMPI_COMM_WORLD_SIZE', '1'))
