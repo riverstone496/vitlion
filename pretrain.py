@@ -405,7 +405,7 @@ def train_one_epoch(
         if num_updates % args.log_sync_momentum_interval == 0 and args.log_variance:
             variance_logs = sync_exp_avg_variance(optimizer, module_param_map, not_replace=True)
         if args.sync_momentum > 0 and num_updates % args.sync_momentum == 0:
-            if args.num_updates <= args.max_iters_sync_momentum or args.max_iters_sync_momentum == -1:
+            if num_updates <= args.max_iters_sync_momentum or args.max_iters_sync_momentum == -1:
                 sync_exp_avg(optimizer)
                 total_sync_momentum += 1
         if num_updates in momentum_iters:
