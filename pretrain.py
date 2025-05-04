@@ -609,7 +609,8 @@ if __name__ == '__main__':
     args.rank = 0  # global rank
     if args.distributed:
         # initialize torch.distributed using MPI
-        port_random = str(random.randint(5000,10000))
+        from random import randint
+        port_random = str(randint(5000,10000))
         master_addr = os.getenv("MASTER_ADDR", default="localhost")
         master_port = os.getenv('MASTER_PORT', default=port_random)
         method = "tcp://{}:{}".format(master_addr, master_port)
