@@ -50,6 +50,7 @@ from optimizer import *
 from utils.sync import sync_exp_avg, calculate_Tv, sync_exp_avg_variance, ClassDistributedSampler
 from utils.dataset import load_cifar5m, CIFAR5mDataset, get_class_subset
 
+total_sync_momentum=0
 
 def print0(message):
     if dist.is_initialized():
@@ -356,6 +357,7 @@ def train_one_epoch(
     backward_time = 0
     step_time = 0
     comm_time = 0
+    global total_sync_momentum
 
     for batch_idx, (input, target) in enumerate(loader):
         last_batch = batch_idx == last_idx
@@ -402,9 +404,10 @@ def train_one_epoch(
         variance_logs = None
         if num_updates % args.log_sync_momentum_interval == 0 and args.log_variance:
             variance_logs = sync_exp_avg_variance(optimizer, module_param_map, not_replace=True)
-        if args.sync_momentum > 0 and num_updates % args.sync_momentum == 0 and num_updates <= args.max_iters_sync_momentum:
-            sync_exp_avg(optimizer)
-            total_sync_momentum += 1
+        if args.sync_momentum > 0 and num_updates % args.sync_momentum == 0:
+            if args.num_updates <= args.max_iters_sync_momentum or args.max_iters_sync_momentum == -1:
+                sync_exp_avg(optimizer)
+                total_sync_momentum += 1
         if num_updates in momentum_iters:
             sync_exp_avg(optimizer)
             total_sync_momentum += 1
@@ -444,7 +447,7 @@ def train_one_epoch(
                         data_time=data_time_m))
 
                 if args.log_wandb:
-                    log_dict = {'epoch': epoch, 'iter': num_updates, 'lr': lr, 'loss': losses_m.val}
+                    log_dict = {'epoch': epoch, 'iter': num_updates, 'lr': lr, 'loss': losses_m.val, 'total_sync_momentum':total_sync_momentum}
                     if variance_logs is not None:
                         log_dict.update(variance_logs)
                         if num_updates % 10000 == 1:
