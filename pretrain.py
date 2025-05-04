@@ -298,6 +298,7 @@ parser.add_argument('--sync_momentum', type=int, default=-1, help='Number of war
 parser.add_argument('--k_sync_momentum', type=int, default=-1, help='Number of warmup iterations')
 parser.add_argument('--max_iters_sync_momentum', type=int, default=-1, help='Number of warmup iterations')
 parser.add_argument('--num_nodes', type=int, default=1, help='Number of warmup iterations')
+parser.add_argument('--sync_momentum_layers', type=str, default='all')
 
 parser.add_argument('--wo_infiniband', action='store_true', help='Compile the model using PyTorch 2.0')
 parser.add_argument('--cluster', type=str, default=None, help='Distributed backend')
