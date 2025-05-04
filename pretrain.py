@@ -123,6 +123,11 @@ parser.add_argument('-b', '--batch-size', type=int, default=32, metavar='N',
 parser.add_argument('-vb', '--validation-batch-size-multiplier', type=int, default=1, metavar='N',
                     help='ratio of validation batch size to training batch size (default: 1)')
 
+parser.add_argument('--ckpt_dir', type=str, default='./ckpt', metavar='N',
+                    help='input batch size for training (default: 32)')
+parser.add_argument('--ckpt_file', type=str, default=None, metavar='N',
+                    help='input batch size for training (default: 32)')
+
 # Web Datasets
 parser.add_argument('--trainshards', default=None,
                     help='path/URL for ImageNet shards')
@@ -1169,10 +1174,9 @@ if __name__ == '__main__':
                     log_wandb=args.log_wandb and has_wandb,
                     num_updates=num_updates)
                 if args.save_ckpt:
-                    ckpt_dir = os.path.join(output_dir, 'ckpt')
-                    os.makedirs(ckpt_dir, exist_ok=True)
+                    os.makedirs(args.ckpt_dir, exist_ok=True)
                     run_name = wandb.run.name if has_wandb else datetime.now().strftime("%Y%m%d-%H%M%S")
-                    ckpt_path = os.path.join(ckpt_dir, f"{run_name.replace('/','_')}_epoch{epoch}.pth.tar")
+                    ckpt_path = os.path.join(args.ckpt_dir, f"{run_name.replace('/','_')}_epoch{epoch}.pth.tar")
                     torch.save({
                         'epoch': epoch,
                         'state_dict': model.state_dict(),
