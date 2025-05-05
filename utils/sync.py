@@ -2,7 +2,7 @@ import torch
 from torch.distributed import all_reduce, ReduceOp
 from torch.utils.data import Dataset, DataLoader, Sampler
 from collections import defaultdict
-import random
+import random, os
 
 def sync_exp_avg(optimizer):
     """
@@ -13,6 +13,7 @@ def sync_exp_avg(optimizer):
     """
     # Ensure distributed training is initialized
     if not torch.distributed.is_initialized():
+        print('not torch.distributed.is_initialized')
         return  # No-op if not in a distributed environment
     
     # Loop through the parameter groups and synchronize exp_avg for each parameter
@@ -25,10 +26,7 @@ def sync_exp_avg(optimizer):
                     state['exp_avg'] = torch.zeros_like(p)
                 exp_avg = state['exp_avg']
                 # Perform all_reduce to sum exp_avg across all GPUs
-                all_reduce(exp_avg, op=ReduceOp.SUM)
-                # Divide by the world size to get the average exp_avg across all GPUs
-                world_size = torch.distributed.get_world_size()
-                exp_avg.div_(world_size)
+                all_reduce(exp_avg, op=ReduceOp.AVG)
 
 def sync_exp_avg_variance(optimizer, module_param_map, not_replace=False):
     """
