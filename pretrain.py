@@ -712,6 +712,7 @@ if __name__ == '__main__':
 
 
     if args.rank == 0:
+        print(model)
         _logger.info(
             f'Model {safe_model_name(args.model)} created, param count:{sum([m.numel() for m in model.parameters()])}')
         # # mkdir output dir
