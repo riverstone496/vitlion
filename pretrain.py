@@ -974,61 +974,81 @@ if __name__ == '__main__':
         pin_memory=args.pin_mem,
         )
     require_backward_grad_sync = True
+    # Create parameter groups: no weight decay for BatchNorm parameters and all biases
+    decay_params = []
+    no_decay_params = []
+    for name, param in model.named_parameters():
+        if not param.requires_grad:
+            continue
+        # Identify BatchNorm parameters by module type name or param name containing "bn"
+        if "bn" in name.lower() or name.endswith(".bias"):
+            no_decay_params.append(param)
+        else:
+            decay_params.append(param)
+    param_groups = [
+        {"params": decay_params, "weight_decay": args.weight_decay},
+        {"params": no_decay_params, "weight_decay": 0.0}
+    ]
     if args.optimizer_name == 'lion':
-        optimizer = Lion(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
+        optimizer = Lion(decay_params, lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
     elif args.optimizer_name == 'sign_lion':
-        optimizer = SignLion(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
+        optimizer = SignLion(decay_params, lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
         require_backward_grad_sync = False
     elif args.optimizer_name == 'com_lion':
-        optimizer = LionCom(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
+        optimizer = LionCom(decay_params, lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
         require_backward_grad_sync = False
     elif args.optimizer_name == 'com_lion_bf16':
-        optimizer = LionComBF16(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
+        optimizer = LionComBF16(decay_params, lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
         require_backward_grad_sync = False
     elif args.optimizer_name == 'grad_lion':
-        optimizer = GradLion(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
+        optimizer = GradLion(decay_params, lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
         require_backward_grad_sync = False
     elif args.optimizer_name == 'grad_lion_bf16':
-        optimizer = GradLionBf16(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
+        optimizer = GradLionBf16(decay_params, lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
         require_backward_grad_sync = False
     elif args.optimizer_name == 'signsgd':
-        optimizer = SignSGD(model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
+        optimizer = SignSGD(decay_params, lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
         require_backward_grad_sync = False
     elif args.optimizer_name == 'ef_signsgd':
-        optimizer = EFSignSGD(model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
+        optimizer = EFSignSGD(decay_params, lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
         require_backward_grad_sync = False
     elif args.optimizer_name == 'ef_lion':
-        optimizer = EfLion(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
+        optimizer = EfLion(decay_params, lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
         require_backward_grad_sync = False
     elif args.optimizer_name == 'ori_ef_sign_sgd':
-        optimizer = ErrorFeedbackSGD(model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
+        optimizer = ErrorFeedbackSGD(decay_params, lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
     elif args.optimizer_name == 'lion_wo_sign':
-        optimizer = LionWoSign(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
+        optimizer = LionWoSign(decay_params, lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
     elif args.optimizer_name == 'u4_sign_lion' or args.optimizer_name == 'lioncub_4bit':
-        optimizer = U4SignLion(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
+        optimizer = U4SignLion(decay_params, lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
         require_backward_grad_sync = False
     elif args.optimizer_name == 'lioncub_4bit_l1':
-        optimizer = LionCub4bitL1(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
+        optimizer = LionCub4bitL1(decay_params, lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
         require_backward_grad_sync = False
     elif args.optimizer_name == 'mean_sign_lion' or args.optimizer_name == 'lioncub_8bit_l1':
-        optimizer = MeanQuantSignLion(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
+        optimizer = MeanQuantSignLion(decay_params, lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
         require_backward_grad_sync = False
     elif args.optimizer_name == 'cmp_mean_sign_lion':
-        optimizer = CMPMeanQuantSignLion(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
+        optimizer = CMPMeanQuantSignLion(decay_params, lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
         require_backward_grad_sync = False
     elif args.optimizer_name == 'cmp_squant_sign_lion':
-        optimizer = CMPSSignSignLion(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
+        optimizer = CMPSSignSignLion(decay_params, lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
         require_backward_grad_sync = False
     elif args.optimizer_name == 'cmp_sign_lion':
-        optimizer = CMPSignLion(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
+        optimizer = CMPSignLion(decay_params, lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
         require_backward_grad_sync = False
     elif args.optimizer_name == 'distributed_lion' or args.optimizer_name == 'lioncub_1bit':
-        optimizer = DistributedLion(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
+        optimizer = DistributedLion(decay_params, lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
         require_backward_grad_sync = False
-    elif args.optimizer_name == 'adamw':
-        optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
-    elif args.optimizer_name == 'sgd':
-        optimizer = torch.optim.SGD(model.parameters(), lr=100*args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
+    elif args.optimizer_name == 'adamw' or args.optimizer_name == 'sgd':
+        # Instantiate optimizer based on choice
+        if args.optimizer_name == 'adamw':
+            optimizer = torch.optim.AdamW(param_groups, lr=args.lr, betas=(args.momentum, args.beta2))
+        elif args.optimizer_name == 'sgd':
+            optimizer = torch.optim.SGD(param_groups, lr=100 * args.lr, momentum=args.momentum)
+        else:
+            # Fallback to default optimizer creation
+            optimizer = create_optimizer_v2(model, **optimizer_kwargs(cfg=args))
 
     module_param_map = {}
     for module_name, module in model.named_modules():
