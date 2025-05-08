@@ -495,7 +495,7 @@ def train_one_epoch(
             lr_scheduler.step_update(num_updates=num_updates, metric=losses_m.avg)
 
         end = time.time()
-        train_all_time += train_time
+    train_all_time += train_time
 
     if hasattr(optimizer, 'sync_lookahead'):
         optimizer.sync_lookahead()
