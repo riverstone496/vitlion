@@ -307,6 +307,8 @@ parser.add_argument('--cluster', type=str, default=None, help='Distributed backe
 # CIFAR Dataset
 parser.add_argument('--cifar_5m_dir', type=str, default='../../dataset/cifar5m/', help='Number of warmup iterations')
 
+parser.add_argument('--bn_nowd', action='store_true', default=False,
+                    help='use cifar dataset')
 parser.add_argument('--use_cifar', action='store_true', default=False,
                     help='use cifar dataset')
 parser.add_argument('--RandomCrop', action='store_true', default=False,
