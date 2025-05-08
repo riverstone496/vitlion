@@ -111,18 +111,22 @@ class U4SignLion(Optimizer):
         if exists(closure):
             with torch.enable_grad():
                 loss = closure()
-        
-        params = []
-        grads = []
-        exp_avgs = []
-        lr = self.defaults['lr']
-        wd = self.defaults['weight_decay']
-        beta1 = self.beta1
-        beta2 = self.beta2
-        original_dtype = self.param_groups[0]['params'][0].grad.dtype
 
-        # Collect parameters, gradients, and exponential averages
+        if torch.distributed.is_initialized():
+            torch.cuda.synchronize()  # Ensure all previous operations are complete
+            elapsed_time = 0.0
+        else:
+            elapsed_time = 0.0
+
         for group in self.param_groups:
+            params = []
+            grads = []
+            exp_avgs = []
+            lr = group.get('lr', self.defaults['lr'])
+            wd = group.get('weight_decay', self.defaults['weight_decay'])
+            beta1 = self.beta1
+            beta2 = self.beta2
+
             for p in group['params']:
                 if p.grad is not None:
                     params.append(p)
@@ -132,38 +136,31 @@ class U4SignLion(Optimizer):
                         state['exp_avg'] = torch.zeros_like(p)
                     exp_avgs.append(state['exp_avg'])
 
-        if not params:
-            return loss  # No parameters to update
+            if not params:
+                continue
 
-        # Compute updates for all parameters and aggregate into a single vector
-        update_vector = compute_updates_sign_int8(params, grads, exp_avgs, lr, wd, beta1)
+            original_dtype = params[0].grad.dtype
 
-        # Perform all_reduce on the aggregated update vector
-        if torch.distributed.is_initialized():
-            torch.cuda.synchronize()  # Ensure all previous operations are complete
-            start_time = time.time()
-            update_vector = compress_allreduce(update_vector, ngpus=self.ngpus)
-            torch.cuda.synchronize()  # Ensure all_reduce is complete
-            elapsed_time = time.time() - start_time
-            # Normalize the update if necessary (e.g., divide by world size)
-            update_vector = update_vector.sign_()
-        else:
-            elapsed_time = 0.0
+            update_vector = compute_updates_sign_int8(params, grads, exp_avgs, lr, wd, beta1)
 
-        # Apply the updates back to each parameter
-        idx = 0  # Pointer to traverse the update_vector
-        for p, exp_avg in zip(params, exp_avgs):
-            numel = p.numel()
-            # Extract the corresponding update for this parameter
-            update = update_vector[idx:idx + numel].view_as(p).to(original_dtype)
-            idx += numel
-            # Apply the update
-            p.add_(update, alpha=-lr)
-            # Update the exponential moving average
-            exp_avg.mul_(beta2).add_(p.grad, alpha=1 - beta2)
+            if torch.distributed.is_initialized():
+                torch.cuda.synchronize()
+                start_time = time.time()
+                update_vector = compress_allreduce(update_vector, ngpus=self.ngpus)
+                torch.cuda.synchronize()
+                elapsed_time += time.time() - start_time
+                update_vector = update_vector.sign_()
+
+            idx = 0
+            for p, exp_avg in zip(params, exp_avgs):
+                numel = p.numel()
+                update = update_vector[idx:idx + numel].view_as(p).to(original_dtype)
+                idx += numel
+                p.add_(update, alpha=-lr)
+                exp_avg.mul_(beta2).add_(p.grad, alpha=1 - beta2)
 
         self.elapsed_time = elapsed_time
-        self.numel = idx
+        self.numel = idx if 'idx' in locals() else 0
         return loss
 
 # from typing import Callable, Optional, Tuple

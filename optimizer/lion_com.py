@@ -54,28 +54,6 @@ class LionCom(Optimizer):
             with torch.enable_grad():
                 loss = closure()
         
-        params = []
-        grads = []
-        exp_avgs = []
-        lr = self.defaults['lr']
-        wd = self.defaults['weight_decay']
-        beta1 = self.beta1
-        beta2 = self.beta2
-
-        # Collect parameters, gradients, and exponential averages
-        for group in self.param_groups:
-            for p in group['params']:
-                if p.grad is not None:
-                    params.append(p)
-                    grads.append(p.grad)
-                    state = self.state[p]
-                    if 'exp_avg' not in state:
-                        state['exp_avg'] = torch.zeros_like(p)
-                    exp_avgs.append(state['exp_avg'])
-
-        if not params:
-            return loss  # No parameters to update
-
         # 変更点開始: 勾配を事前に all_reduce する
         if torch.distributed.is_initialized():
             world_size = torch.distributed.get_world_size()
@@ -84,9 +62,11 @@ class LionCom(Optimizer):
             start_time = time.time()
             
             # 各勾配テンソルに対して all_reduce を実行
-            for grad in grads:
-                all_reduce(grad, op=ReduceOp.SUM)
-                grad.div_(world_size)  # 平均勾配にする
+            for group in self.param_groups:
+                for p in group['params']:
+                    if p.grad is not None:
+                        all_reduce(p.grad, op=ReduceOp.SUM)
+                        p.grad.div_(world_size)  # 平均勾配にする
             
             torch.cuda.synchronize()
             elapsed_time = time.time() - start_time
@@ -94,6 +74,23 @@ class LionCom(Optimizer):
             elapsed_time = 0.0
         # 変更点終了
         self.elapsed_time = elapsed_time
-        # Compute updates for all parameters and aggregate into a single vector
-        compute_updates_sign(params, grads, exp_avgs, lr, wd, beta1, beta2)
+
+        # Compute updates per parameter group using each group's lr and weight_decay
+        for group in self.param_groups:
+            group_lr = group.get('lr', self.defaults['lr'])
+            group_wd = group.get('weight_decay', self.defaults['weight_decay'])
+            group_params = []
+            group_grads = []
+            group_exp_avgs = []
+            for p in group['params']:
+                if p.grad is None:
+                    continue
+                group_params.append(p)
+                group_grads.append(p.grad)
+                state = self.state[p]
+                if 'exp_avg' not in state:
+                    state['exp_avg'] = torch.zeros_like(p)
+                group_exp_avgs.append(state['exp_avg'])
+            if group_params:
+                compute_updates_sign(group_params, group_grads, group_exp_avgs, group_lr, group_wd, self.beta1, self.beta2)
         return loss

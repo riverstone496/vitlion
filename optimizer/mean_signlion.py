@@ -1,4 +1,3 @@
-
 from typing import Callable, Optional, Tuple
 
 import torch
@@ -78,56 +77,56 @@ class  MeanQuantSignLion(Optimizer):
         if exists(closure):
             with torch.enable_grad():
                 loss = closure()
-        
-        params = []
-        grads = []
-        exp_avgs = []
-        lr = self.defaults['lr']
-        wd = self.defaults['weight_decay']
-        beta1 = self.beta1
-        beta2 = self.beta2
-        original_dtype = self.param_groups[0]['params'][0].grad.dtype
 
-        # Collect parameters, gradients, and exponential averages
+        # Process each parameter group with its own lr and weight_decay
+        self.elapsed_time = 0.0
+        total_params = 0
         for group in self.param_groups:
+            group_lr = group.get('lr', self.defaults['lr'])
+            group_wd = group.get('weight_decay', self.defaults['weight_decay'])
+            beta1 = self.beta1
+            beta2 = self.beta2
+
+            # Collect this group's parameters, grads, and exp_avgs
+            params = []
+            grads = []
+            exp_avgs = []
             for p in group['params']:
-                if p.grad is not None:
-                    params.append(p)
-                    grads.append(p.grad)
-                    state = self.state[p]
-                    if 'exp_avg' not in state:
-                        state['exp_avg'] = torch.zeros_like(p)
-                    exp_avgs.append(state['exp_avg'])
+                if p.grad is None:
+                    continue
+                params.append(p)
+                grads.append(p.grad)
+                state = self.state[p]
+                if 'exp_avg' not in state:
+                    state['exp_avg'] = torch.zeros_like(p)
+                exp_avgs.append(state['exp_avg'])
 
-        if not params:
-            return loss  # No parameters to update
+            if not params:
+                continue
 
-        # Compute updates for all parameters and aggregate into a single vector
-        update_vector = compute_updates_sign_int8(params, grads, exp_avgs, lr, wd, beta1, s = self.s, clip = self.clip)
+            total_params += sum(p.numel() for p in params)
+            original_dtype = params[0].grad.dtype
 
-        # Perform all_reduce on the aggregated update vector
-        if torch.distributed.is_initialized():
-            torch.cuda.synchronize()  # Ensure all previous operations are complete
-            start_time = time.time()
-            all_reduce(update_vector, op=ReduceOp.SUM)
-            torch.cuda.synchronize()  # Ensure all_reduce is complete
-            elapsed_time = time.time() - start_time
-            update_vector = update_vector.sign_()
-        else:
-            elapsed_time = 0.0
+            # Compute updates for this group
+            update_vector = compute_updates_sign_int8(params, grads, exp_avgs, group_lr, group_wd, beta1, s=self.s, clip=self.clip)
 
-        # Apply the updates back to each parameter
-        idx = 0  # Pointer to traverse the update_vector
-        for p, exp_avg in zip(params, exp_avgs):
-            numel = p.numel()
-            # Extract the corresponding update for this parameter
-            update = update_vector[idx:idx + numel].view_as(p).to(original_dtype)
-            idx += numel
-            # Apply the update
-            p.add_(update, alpha=-lr)
-            # Update the exponential moving average
-            exp_avg.mul_(beta2).add_(p.grad, alpha=1 - beta2)
+            # Distributed all-reduce if needed
+            if torch.distributed.is_initialized():
+                torch.cuda.synchronize()
+                start_time = time.time()
+                all_reduce(update_vector, op=ReduceOp.SUM)
+                torch.cuda.synchronize()
+                self.elapsed_time += time.time() - start_time
+                update_vector = update_vector.sign_()
 
-        self.elapsed_time = elapsed_time
-        self.numel = idx
+            # Apply updates back to this group's parameters
+            idx = 0
+            for p, exp_avg in zip(params, exp_avgs):
+                numel = p.numel()
+                update = update_vector[idx:idx + numel].view_as(p).to(original_dtype)
+                idx += numel
+                p.add_(update, alpha=-group_lr)
+                exp_avg.mul_(beta2).add_(p.grad, alpha=1 - beta2)
+
+        self.numel = total_params
         return loss
