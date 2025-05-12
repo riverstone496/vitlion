@@ -1033,6 +1033,9 @@ if __name__ == '__main__':
     elif args.optimizer_name == 'mean_sign_lion' or args.optimizer_name == 'lioncub_8bit_l1':
         optimizer = MeanQuantSignLion(param_groups, lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
         require_backward_grad_sync = False
+    elif args.optimizer_name == 'lioncub_8bit_l0':
+        optimizer = Lioncub8bitL0(param_groups, lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
+        require_backward_grad_sync = False
     elif args.optimizer_name == 'cmp_mean_sign_lion':
         optimizer = CMPMeanQuantSignLion(param_groups, lr=args.lr, betas=(args.momentum, args.beta2), weight_decay=args.weight_decay)
         require_backward_grad_sync = False

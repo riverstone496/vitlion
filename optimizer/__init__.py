@@ -17,3 +17,4 @@ from .cmp_mean_signlion import CMPMeanQuantSignLion
 from .cmp_signlion import CMPSignLion
 from .distributed_lion import DistributedLion
 from .lioncub_4bit_l1 import LionCub4bitL1
+from .lioncub_8bit_l0 import Lioncub8bitL0
