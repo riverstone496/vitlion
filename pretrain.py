@@ -588,7 +588,13 @@ if __name__ == '__main__':
             drop_connect_rate=args.drop_connect,
             drop_block_rate=args.drop_block
         )
-        model.load_state_dict(checkpoint['state_dict'])
+        # fix mismatched module names by stripping 'module.' prefix
+        orig_state_dict = checkpoint['state_dict']
+        new_state_dict = OrderedDict()
+        for k, v in orig_state_dict.items():
+            name = k[7:] if k.startswith('module.') else k
+            new_state_dict[name] = v
+        model.load_state_dict(new_state_dict, strict=False)
         # optimizer will be created later, but we'll load state_dict after creation
         start_epoch = checkpoint.get('epoch', 0) + 1
         train_all_time = checkpoint.get('train_all_time', 0)
